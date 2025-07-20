@@ -4,7 +4,7 @@ KVERSION := $(shell uname -r)
 HEADERS := /lib/modules/$(KVERSION)/build/
 
 modules:
-	make -C $(HEADERS) M=$(PWD) modules
+	make -C $(HEADERS) M=$(PWD) modules CONFIG_UBSAN=n
 
 clean:
 	make -C $(HEADERS) M=$(PWD) clean

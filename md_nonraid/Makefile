@@ -1,5 +1,6 @@
 PWD := $(shell pwd)
-HEADERS := /lib/modules/$(shell uname -r)/build/
+KVERSION := $(shell uname -r)
+HEADERS := /lib/modules/$(KVERSION)/build/
 md-nonraid-m += md_unraid.o unraid.o
 obj-m += md-nonraid.o
 

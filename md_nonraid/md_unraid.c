@@ -1272,7 +1272,31 @@ static int start_array(dev_t array_dev, char *state)
 		printk("md: start_array: state %s does't match %s\n", state, mddev->state);
 		return -EINVAL;
 	}
-	
+
+	/* ensure all disks from superblock have been imported */
+	int i;
+	for (i = 0; i < MD_SB_DISKS; i++) {
+		mdp_disk_t *disk = &mddev->sb.disks[i];
+		mdk_rdev_t *rdev = &mddev->rdev[i];
+
+		if (disk_active(disk)) {
+			/* Active disk must have been imported (status != DISK_NP) OR be properly degraded */
+			if (rdev->status == DISK_NP && rdev->size == 0) {
+				/* Check if this is a "real" active disk vs auto-activated parity */
+				if (disk_enabled(disk) && disk_valid(disk)) {
+					/* This disk has full state (7) - it was genuinely active */
+					printk("md: start_array: active disk %d not imported\n", i);
+					return -EINVAL;
+				} else if (i != MD_SB_P_IDX && i != MD_SB_Q_IDX) {
+					/* Non-parity disk that's only "active" (state=4) should also be imported */
+					printk("md: start_array: active data disk %d not imported\n", i);
+					return -EINVAL;
+				}
+				/* Otherwise it's likely an auto-activated parity disk, which is OK */
+			}
+		}
+	}
+
 	sb = &mddev->sb;
 
         /* new array (both P and Q are invalid) */

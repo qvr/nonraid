@@ -1,0 +1,4 @@
+Makefile    usr/src/${env:DEB_SOURCE}-${env:DEB_VERSION_UPSTREAM}
+README.md   usr/src/${env:DEB_SOURCE}-${env:DEB_VERSION_UPSTREAM}
+md_nonraid  usr/src/${env:DEB_SOURCE}-${env:DEB_VERSION_UPSTREAM}
+raid6       usr/src/${env:DEB_SOURCE}-${env:DEB_VERSION_UPSTREAM}

@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE=1
+export DH_AUTOSCRIPTDIR="debian/scripts/"
+
+include /usr/share/dpkg/pkg-info.mk
+export DEB_SOURCE
+export DEB_VERSION_UPSTREAM
+
+%:
+	dh $@ --parallel
+
+# Nothing to configure, build or auto-install
+override_dh_auto_configure:
+override_dh_auto_build:
+override_dh_auto_test:
+override_dh_auto_install:
+override_dh_auto_clean:

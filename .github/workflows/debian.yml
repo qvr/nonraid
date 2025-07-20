@@ -1,0 +1,60 @@
+name: Build Debian Package
+
+on:
+  workflow_dispatch:
+
+env:
+  DEB_BUILD_OPTIONS: nocheck
+
+jobs:
+  build-artifact:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Debian Package Building Dependencies
+        run: sudo bash debian/install_pkg_build_deps.sh
+
+      - name: Create Debian Package
+        run: make clean package
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: nonraid-dkms-${{ github.run_number }}
+          name: NonRAID DKMS Debian Package - Build ${{ github.run_number }}
+          body: |
+            **NonRAID DKMS Package - Build ${{ github.run_number }}**
+
+            This release contains the NonRAID kernel driver DKMS package for Ubuntu/Debian systems.
+
+            ## What's Included
+            - `nonraid-dkms` package with kernel module source and build scripts
+            - Compatible with kernel versions 6.6 - 6.8
+            - Tested on Ubuntu 24.04 LTS
+
+            ## Installation
+            ```bash
+            sudo dpkg -i nonraid-dkms_*.deb
+            sudo update-initramfs -u -k all
+            # Reboot required
+            ```
+
+            ## Usage
+            After installation and reboot, load the driver:
+            ```bash
+            sudo modprobe nonraid super=/path/to/unraid.dat
+            ```
+
+            ## Important Notes
+            - ⚠️ **Experimental software** - Use at your own risk
+            - Requires manual array management via `/proc/nmdcmd`
+            - See [README.md](https://github.com/${{ github.repository }}/blob/main/README.md) for detailed usage instructions
+            - Always backup important data before use
+          files: |
+            ../*.deb

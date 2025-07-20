@@ -9,5 +9,5 @@ modules:
 clean:
 	make -C $(HEADERS) M=$(PWD) clean
 
-package: all
+package:
 	dpkg-buildpackage -b -rfakeroot -us -uc

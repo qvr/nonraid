@@ -1,0 +1,5 @@
+nonraid-dkms for Debian
+
+This installs a DKMS for NonRAID, an unRAID compatible storage array driver.
+
+ -- Matti Hiljanen <matti@hiljanen.com>  Mon, 21 Jul 2025 00:47:04 +0200

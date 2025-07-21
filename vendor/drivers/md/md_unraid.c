@@ -413,20 +413,20 @@ static int lock_bdev(char *name, mdk_rdev_t *rdev)
 	
         snprintf(path, sizeof(path), "/dev/%s", name);
         
-	rdev->bdev_handle = bdev_open_by_path(path, FMODE_READ|FMODE_WRITE, NULL, NULL);
-	if (IS_ERR(rdev->bdev_handle)) {
-                int err = PTR_ERR(rdev->bdev_handle);
+	rdev->bdev_file = bdev_file_open_by_path(path, FMODE_READ|FMODE_WRITE, NULL, NULL);
+	if (IS_ERR(rdev->bdev_file)) {
+                int err = PTR_ERR(rdev->bdev_file);
                 return err;
         }
 	
-	rdev->bdev = rdev->bdev_handle->bdev;
+        rdev->bdev = file_bdev(rdev->bdev_file);
 	return 0;
 }
 
 static void unlock_bdev(mdk_rdev_t *rdev)
 {
 	if (rdev->bdev) {
-		bdev_release(rdev->bdev_handle);
+		fput(rdev->bdev_file);
                 rdev->bdev = NULL;
         }
 }
@@ -1020,7 +1020,7 @@ static int do_run(mddev_t *mddev)
 
 		if (disk_active(disk) || disk_enabled(disk)) {
 			int unit = disk->number;
-			struct gendisk *gd = blk_alloc_disk(NUMA_NO_NODE);
+			struct gendisk *gd = blk_alloc_disk(NULL,NUMA_NO_NODE);
                         int ret;
 
 			mddev->gendisk[unit] = gd;
@@ -1037,15 +1037,17 @@ static int do_run(mddev_t *mddev)
                         set_capacity(gd, disk->size*2);
 
                         blk_set_stacking_limits(&gd->queue->limits);
-			blk_queue_write_cache(gd->queue, true, true);
+                        gd->queue->limits.features = BLK_FEAT_WRITE_CACHE | BLK_FEAT_FUA |
+                                BLK_FEAT_IO_STAT | BLK_FEAT_NOWAIT |
+                                BLK_FEAT_ROTATIONAL;
+
+                        blk_queue_disable_discard(gd->queue);
+                        blk_queue_disable_secure_erase(gd->queue);
+                        blk_queue_disable_write_zeroes(gd->queue);
 
                         if (md_restrict & 1)
-                                blk_queue_max_hw_sectors(gd->queue, 256);  /* 256 sectors => 128K */
-
-                        blk_queue_max_write_zeroes_sectors(gd->queue, 0);
-                        blk_queue_max_discard_sectors(gd->queue, 0);
-                        blk_queue_flag_clear(QUEUE_FLAG_NONROT, gd->queue);
-
+                                gd->queue->limits.max_hw_sectors = 256;  /* 256 sectors => 128K */
+                        
 			ret = add_disk(gd);
 			printk("md%dp1: running, size: %llu blocks\n", unit, disk->size);
 		}

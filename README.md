@@ -15,8 +15,9 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 ## Installation
 This has been tested on Ubuntu 24.04 LTS, but the DKMS driver should work on any kernel version between 6.6 - 6.8.
 
-For Ubuntu/Debian based systems, download the latest kernel module dkms package from releases, and install it:
+For Ubuntu/Debian based systems, download the latest kernel module dkms package from releases, and install it and the prerequisites:
 ```
+sudo apt install dkms linux-headers-$(uname -r) build-essential
 sudo dpkg -i nonraid-dkms_*.deb
 sudo update-initramfs -u -k all
 ```

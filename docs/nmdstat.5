@@ -1,0 +1,349 @@
+NMDSTAT(5) - NonRAID Driver Status Interface
+
+NAME
+nmdstat - NonRAID driver status interface
+
+SYNOPSIS
+/proc/nmdstat
+
+DESCRIPTION
+The /proc/nmdstat file provides detailed status information for the NonRAID 
+(Multiple Devices) driver. This interface exposes array configuration, disk 
+states, recovery operations, and performance statistics in a structured text 
+format.
+
+FORMAT
+The output consists of key-value pairs in the format:
+    key=value
+
+Fields are organized into sections: superblock information (sb*), array 
+metadata (md*), and per-disk information (disk*/rdev*).
+
+SUPERBLOCK FIELDS
+
+sbName
+    Path to the superblock file
+
+sbVersion
+    Superblock format version (major.minor.patch)
+
+sbCreated
+    Unix timestamp when array was created
+
+sbUpdated
+    Unix timestamp of last superblock update
+
+sbEvents
+    Superblock update counter
+
+sbState
+    Superblock state flags (0=clean, others indicate unclean shutdown)
+
+sbNumDisks
+    Number of disk slots configured in array
+
+sbLabel
+    User-assigned array label
+
+sbSynced
+    Unix timestamp when last sync operation started
+
+sbSynced2
+    Unix timestamp when last sync operation completed
+
+sbSyncErrs
+    Number of errors encountered during last sync
+
+sbSyncExit
+    Exit code of last sync operation (0=success, negative=error)
+
+ARRAY METADATA FIELDS
+
+mdVersion
+    Driver version (major.minor.patch)
+
+mdState
+    Current array state (see ARRAY STATES section)
+
+mdNumDisks
+    Number of disks currently present
+
+mdNumDisabled
+    Number of disabled disks
+
+mdNumReplaced
+    Number of replaced disks awaiting reconstruction
+
+mdNumInvalid
+    Number of invalid disks (needs reconstruction)
+
+mdNumMissing
+    Number of missing disks
+
+mdNumWrong
+    Number of wrong disks (incorrect disk in slot)
+
+mdNumNew
+    Number of new disks awaiting integration
+
+mdSwapP, mdSwapQ
+    Slot numbers for parity disk swaps (0=none)
+
+mdResyncAction
+    Description of current/last recovery operation
+
+mdResyncSize
+    Total size of recovery operation in 1K blocks
+
+mdResyncCorr
+    Parity correction mode (0=check only, 1=correct errors)
+
+mdResync
+    Total sectors to be processed in current recovery
+
+mdResyncPos
+    Current position in recovery operation (1K blocks)
+
+mdResyncDt
+    Time delta for rate calculation (seconds)
+
+mdResyncDb
+    Blocks processed in time delta
+
+DISK FIELDS
+For each disk slot N (0-29), the following fields are provided:
+
+diskNumber.N
+    Disk slot number
+
+diskName.N
+    Device name (md<N>p1) or empty if inactive
+
+diskSize.N
+    Configured disk size in 1K blocks
+
+diskState.N
+    Disk state flags (see DISK STATE FLAGS)
+
+diskId.N
+    Disk identification string
+
+rdevStatus.N
+    Current disk status (see DISK STATUSES)
+
+rdevName.N
+    Physical device name (e.g., sda, sdb)
+
+rdevOffset.N
+    Starting sector offset on physical device
+
+rdevSize.N
+    Physical device size in 1K blocks
+
+rdevId.N
+    Physical device identification string
+
+rdevReads.N, rdevWrites.N
+    I/O operation counters
+
+rdevNumErrors.N
+    Error counter for this device
+
+ARRAY STATES
+
+STARTED
+    Array is running normally
+
+STOPPED
+    Array is not running
+
+NEW_ARRAY
+    New array configuration detected
+
+RECON_DISK
+    Disk reconstruction in progress or needed
+
+DISABLE_DISK
+    Disk disable operation needed
+
+SWAP_DSBL
+    Disk swap operation for disabled disk
+
+ERROR:*
+    Error states indicating configuration problems:
+    - ERROR:INVALID_EXPANSION
+    - ERROR:PARITY_NOT_BIGGEST
+    - ERROR:TOO_MANY_MISSING_DISKS
+    - ERROR:NEW_DISK_TOO_SMALL
+    - ERROR:NO_DATA_DISKS
+
+DISK STATUSES
+
+DISK_OK
+    Disk present, correct, and valid
+
+DISK_NP
+    No disk present, no disk configured
+
+DISK_NP_MISSING
+    Enabled disk is missing
+
+DISK_INVALID
+    Disk present but not valid (needs reconstruction)
+
+DISK_WRONG
+    Wrong disk present in slot
+
+DISK_DSBL
+    Disabled, old disk still present
+
+DISK_NP_DSBL
+    Disabled, no disk present
+
+DISK_DSBL_NEW
+    Disabled, new disk present
+
+DISK_NEW
+    New disk detected
+
+DISK STATE FLAGS
+Disk state is represented as a bitmask:
+
+Bit 0 (VALID)
+    Disk contains valid data
+
+Bit 1 (ENABLED)
+    Disk is enabled for array operations
+
+Bit 2 (ACTIVE)
+    Disk is active in array configuration
+
+MONITORING GUIDANCE
+
+Critical Fields to Monitor
+
+mdState
+    Should be "STARTED" for normal operation. Error states require attention.
+
+sbState
+    Should be 1 (clean). Value 0 indicates unclean shutdown.
+
+mdNumMissing, mdNumWrong, mdNumInvalid
+    Non-zero values indicate degraded array requiring attention.
+
+rdevNumErrors.N
+    Increasing error counts indicate failing drives.
+
+mdResyncAction, mdResyncPos
+    Monitor recovery progress and detect stalled operations.
+
+Recovery Operations
+Recovery operations are indicated by:
+
+mdResync > 0
+    Recovery is active
+
+mdResyncAction
+    Describes operation type: "check", "recon", "clear"
+
+Progress calculation
+    (mdResyncPos / mdResyncSize) * 100 = percentage complete
+
+Rate calculation
+    mdResyncDb / mdResyncDt = blocks per second
+
+Error Conditions
+
+Array not starting
+    Check for ERROR states in mdState
+
+Degraded array
+    Monitor mdNumMissing + mdNumInvalid ≤ 2 for dual-parity protection
+
+Drive failures
+    Watch for increasing rdevNumErrors and DISK_INVALID status
+
+Sync errors
+    Monitor sbSyncErrs for data integrity issues
+
+EXAMPLES
+
+Normal Running Array
+    mdState=STARTED
+    mdNumDisks=5
+    mdNumInvalid=0
+    mdNumMissing=0
+    sbState=1
+
+Array with Failing Drive
+    mdState=STARTED
+    mdNumDisks=5
+    mdNumInvalid=1
+    rdevStatus.3=DISK_INVALID
+    rdevNumErrors.3=127
+
+Parity Check in Progress
+    mdResyncAction=check P Q
+    mdResync=2000000
+    mdResyncPos=500000
+    mdResyncDt=30
+    mdResyncDb=50000
+
+Progress: 25% complete at 1,667 blocks/second
+
+New Array Configuration
+    mdState=NEW_ARRAY
+    mdNumNew=3
+    mdNumInvalid=2
+    mdResyncAction=recon P Q
+    
+Array with Missing Disk
+    mdState=STARTED
+    mdNumMissing=1
+    mdNumInvalid=0
+    rdevStatus.5=DISK_NP_MISSING
+
+SPECIAL DISK SLOTS
+
+Slot 0 (P-parity)
+    Primary parity disk
+
+Slot 29 (Q-parity)
+    Secondary parity disk (dual-parity arrays)
+
+Slots 1-28
+    Data disk slots
+
+PERFORMANCE MONITORING
+
+I/O Statistics
+Monitor rdevReads.N and rdevWrites.N to track disk usage patterns.
+
+Error Tracking
+Increasing rdevNumErrors.N values indicate potential disk problems.
+
+Recovery Performance
+Use mdResyncDb/mdResyncDt to calculate recovery speed in blocks per second.
+
+FILES
+
+/proc/nmdstat
+    Read-only status interface
+
+/proc/nmdcmd
+    Write-only command interface
+
+SEE ALSO
+nmdcmd(8)
+
+NOTES
+The NonRAID driver is specifically designed for unRAID's single/dual-parity
+array architecture and differs significantly from standard Linux MD-RAID.
+
+All disk sizes are reported in 1024-byte blocks unless otherwise specified.
+Sector counts are in 512-byte sectors.
+
+Recovery operations can be paused and resumed. A paused recovery will show
+mdResync=0 but mdResyncPos will retain the last position.
+
+The driver supports up to 30 disks total: 28 data disks plus 2 parity disks.

@@ -1,0 +1,259 @@
+NMDCMD(8)                  System Administration Commands               NMDCMD(8)
+
+NAME
+       nmdcmd - NonRAID array management command interface
+
+SYNOPSIS
+       echo "COMMAND [options]" > /proc/nmdcmd
+
+DESCRIPTION
+       The nmdcmd interface provides low-level control over NonRAID arrays through
+       the /proc filesystem. Commands are written as text strings to /proc/nmdcmd
+       and execute immediately. All operations are logged when md_trace > 0.
+
+ARRAY MANAGEMENT COMMANDS
+
+   import SLOT NAME OFFSET SIZE ERASED ID
+       Imports a disk device into the specified array slot. This command must be
+       executed for each disk before starting the array.
+
+       SLOT     Disk slot number (0-29)
+                0 = P (parity) disk
+                1-28 = Data disks (disk1-disk28)
+                29 = Q (dual parity) disk
+
+       NAME     Device name without /dev/ prefix (e.g., "sda1", "nvme0n1p1")
+
+       OFFSET   Starting sector offset (512-byte sectors)
+                For partitions: typically 0
+                For raw disks: sectors to skip (e.g., 2048 for 1MB alignment)
+
+       SIZE     Usable size in 1024-byte blocks
+
+       ERASED   Disk erasure flag (0 or 1)
+                0 = Disk contains data (safe default)
+                1 = Disk is completely blank
+                Is only used when adding new disks to array.
+
+       ID       Disk identifier string (typically model_serial format)
+
+   start [STATE]
+       Starts the array with the specified state. The STATE parameter serves as
+       a safety mechanism - it must exactly match the current detected array
+       state or the command fails.
+
+       STATE    Expected array state (default: "STOPPED")
+                Valid states: STOPPED, NEW_ARRAY, RECON_DISK,
+                DISABLE_DISK, SWAP_DSBL
+
+   stop
+       Stop the running array. All devices must be unmounted first.
+
+   label LABEL
+       Set array label when stopped.
+       LABEL    Text label for the array (length limited)
+
+PARITY OPERATIONS
+
+   check [OPTION] [OFFSET]
+       Start parity check/sync operation.
+       OPTION   CORRECT   - Check and correct parity errors (default)
+                NOCORRECT - Check only, report but don't fix errors
+                RESUME    - Resume paused operation
+       OFFSET   Starting sector offset (must be multiple of 8)
+
+   nocheck OPTION
+       Stop parity check/sync operation.
+       OPTION   CANCEL - Cancel operation completely
+                PAUSE  - Pause operation (can be resumed)
+
+CONFIGURATION COMMANDS
+
+   set PARAMETER [VALUE]
+       Set various system parameters. If VALUE is omitted, parameter is reset
+       to its default value.
+
+   set md_trace [LEVEL]
+       Set debug trace level (default: 1)
+       LEVEL    0 = no tracing
+                1 = command tracing
+                2 = command + debug info
+                3 = command + debug + I/O operations
+                4 = command + debug + I/O + detailed info
+
+   set md_num_stripes [COUNT]
+       Set number of stripe cache entries (default: 1280)
+       COUNT    Number of stripes (affects memory usage and performance)
+
+   set md_queue_limit [PERCENT]
+       Set I/O queue limit as percentage (default: 80)
+       PERCENT  1-100, throttles normal I/O operations
+
+   set md_sync_limit [PERCENT]
+       Set sync queue limit as percentage (default: 5)
+       PERCENT  0-100, throttles parity check/sync operations
+
+   set md_write_method [METHOD]
+       Set write algorithm (default: 0)
+       METHOD   0 = READ_MODIFY_WRITE (faster for small writes)
+                1 = RECONSTRUCT_WRITE (faster for large writes)
+
+   set md_restrict [VALUE]
+       Set restriction flags (default: 1)
+       VALUE    Bit flags for various restrictions
+
+   set invalidslot [SLOTA] [SLOTB]
+       Set slots to start as invalid (default: 0 29)
+       Can be used to prevent parity reconstruction during
+       array topology changes by setting invalidslot outside
+       of normal slot range (98/99).
+       SLOTA    First invalid slot (default: P disk slot 0)
+       SLOTB    Second invalid slot (default: Q disk slot 29)
+
+   set resync_start [SECTOR]
+       Set parity sync start position (default: 0)
+       SECTOR   Starting sector for sync operations
+
+   set resync_end [SECTOR]
+       Set parity sync end position (default: 0 = auto)
+       SECTOR   Ending sector for sync operations
+
+DEBUG AND TESTING COMMANDS
+
+   set rderror SLOT
+       Simulate read error on next operation
+       SLOT     Disk slot number to simulate error on
+
+   set wrerror SLOT
+       Simulate write error on next operation
+       SLOT     Disk slot number to simulate error on
+
+   dump
+       Display current array and performance statistics
+
+   status
+       Dummy command (no operation as of v4.6)
+
+ARRAY STATES
+
+   STOPPED
+       Normal shutdown state. Array was cleanly stopped with no issues.
+       Most common case for regular startup after shutdown.
+
+   NEW_ARRAY
+       Fresh array with all new disks. Parity disks will be marked
+       invalid initially and require initialization.
+
+   RECON_DISK
+       One or more disks have been replaced or don't match superblock
+       records. Invalid disks will be reconstructed during startup.
+
+   DISABLE_DISK
+       One or more disks are missing from the array. Missing disks
+       will be marked disabled and the array will run in degraded mode.
+
+   SWAP_DSBL
+       Parity disks detected in wrong physical slots but found in
+       disabled data slots. Array configuration will be updated.
+
+   Error States (prevent array startup):
+       INVALID_EXPANSION     - Cannot add new disks with other changes pending
+       PARITY_NOT_BIGGEST    - Parity disk smaller than largest data disk
+       TOO_MANY_MISSING_DISKS - More than 2 disks missing/failed
+       NEW_DISK_TOO_SMALL    - Replacement disk smaller than original
+       NO_DATA_DISKS         - Only parity disks assigned, no data disks
+
+ERASED PARAMETER DETAILS
+
+   The ERASED flag indicates whether the disk contains only zeros and no
+   existing data. This flag significantly affects array startup behavior:
+
+   ERASED=1 (Disk is blank)
+          • Disk is assumed to contain only zeros
+          • No clearing operation required
+          • Immediate activation as valid disk
+          • Faster array startup
+          • USE ONLY if disk is completely blank
+
+   ERASED=0 (Disk contains data)
+          • Disk may contain existing data
+          • Clearing operation will be performed if needed
+          • Disk zeroed before activation when necessary
+          • Slower but safer startup
+          • DEFAULT choice for safety
+
+   When ERASED=0 and the array has valid parity, NonRAID may perform a "clear"
+   operation that writes zeros to the entire disk.
+
+EXAMPLES
+
+   Basic Array Setup:
+       # Import 3 data disks
+       echo "import 1 sda1 0 976762584 0 WDC_WD10EADS_WD-WCAV12345678" > /proc/nmdcmd
+       echo "import 2 sdb1 0 976762584 0 WDC_WD10EADS_WD-WCAV12345679" > /proc/nmdcmd
+       echo "import 3 sdc1 0 976762584 0 WDC_WD10EADS_WD-WCAV12345680" > /proc/nmdcmd
+
+       # Import parity disks
+       echo "import 0 sdd1 0 976762584 0 WDC_WD10EADS_WD-WCAV12345681" > /proc/nmdcmd
+       echo "import 29 sde1 0 976762584 0 WDC_WD10EADS_WD-WCAV12345682" > /proc/nmdcmd
+
+       # Start new array
+       echo "start NEW_ARRAY" > /proc/nmdcmd
+
+   Parity Operations:
+       # Start parity check with correction
+       echo "check CORRECT" > /proc/nmdcmd
+
+       # Pause parity check
+       echo "nocheck PAUSE" > /proc/nmdcmd
+
+       # Resume parity check from where it left off
+       echo "check RESUME" > /proc/nmdcmd
+
+   Performance Tuning:
+       # Set "turbo write" mode
+       echo "set md_write_method 1" > /proc/nmdcmd
+
+       # Enable verbose debugging
+       echo "set md_trace 3" > /proc/nmdcmd
+
+   Adding a Disk to an Existing Array:
+       # Import repurposed disk (not erased - will be cleared)
+       echo "import 4 sdf1 0 1953525168 0 SEAGATE_ST2000DM001_Z1E4ABCD" > /proc/nmdcmd
+
+       # Start array (will clear new disk if needed)
+       echo "start RECON_DISK" > /proc/nmdcmd
+
+   State Checking Workflow:
+       # Check current array state
+       grep "mdState=" /proc/nmdstat
+
+       # Start with matching state only
+       echo "start DISABLE_DISK" > /proc/nmdcmd  # if state shows DISABLE_DISK
+
+       # Monitor startup progress
+       watch "grep -E '(mdState|mdResync)' /proc/nmdstat"
+
+SLOT ASSIGNMENTS
+       Slot 0:     P (Parity) disk
+       Slots 1-28: Data disks (disk1-disk28)
+       Slot 29:    Q (Second parity) disk
+       Slot 30:    Reserved for future use
+
+DIAGNOSTICS
+       Check /proc/nmdstat for current array state and status information.
+       Error messages are logged to kernel log (dmesg).
+
+FILES
+       /proc/nmdcmd    Command interface
+       /proc/nmdstat   Status information
+
+WARNINGS
+       • Setting ERASED=1 incorrectly can cause data corruption
+       • Always verify disk is completely blank before using ERASED=1
+       • Array state must match exactly for start command to succeed
+       • Commands execute immediately with no confirmation prompts
+       • All commands are processed sequentially
+       • Array must be stopped for import/label operations
+       • Parity operations require array to be started
+       • Invalid commands return error without processing

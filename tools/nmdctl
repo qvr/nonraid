@@ -577,6 +577,7 @@ display_disk_entry() {
     local rdevnumerrors="${7:-0}"
     local diskname="$8"
     local mdstate="$9"
+    local fs_type=""
 
     # Convert size to GB
     local sizegb=0
@@ -602,10 +603,24 @@ display_disk_entry() {
     printf "%$((21 - visible_length))s" " " # Use visible length for padding
 
     if [ "$mdstate" = "STARTED" ]; then
-        # Include disk name column when array is started
-        printf "%-10s  %-14s  %-8s  %s\n" "${rdevname:-none}" "${diskname:-${slottype:-$idx}}" "$sizegb" "$diskid"
+        # Get filesystem type for data disks when array is started
+        if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
+            # For data disks, get the filesystem type
+            if [[ "$idx" != "0" && "$idx" != "29" ]]; then
+                # Check if device exists before calling blkid
+                if [ -b "/dev/$rdevname" ]; then
+                    fs_type=$(get_fs_type "/dev/$rdevname")
+                fi
+            else
+                # For parity disks, use slot type (P or Q)
+                fs_type="${slottype:-}"
+            fi
+        fi
+
+        # Include disk name and filesystem columns when array is started
+        printf "%-10s  %-8s  %-14s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-}" "$diskid"
     else
-        # Original format without disk name
+        # Original format without disk name and filesystem
         printf "%-10s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
     fi
 }
@@ -619,8 +634,8 @@ show_disk_status() {
     echo ""
 
     if [ "$mdstate" = "STARTED" ]; then
-        echo -e "Slot  Status               Device      Disk Name       Size(GB)  Drive ID"
-        echo -e "----  -------------------  ----------  -------------   --------  -------------------------------------"
+        echo -e "Slot  Status               Device      Size(GB)  Disk Name       FS        Drive ID"
+        echo -e "----  -------------------  ----------  --------  -------------   --------  -------------------------------------"
     else
         echo -e "Slot  Status               Device      Size(GB)  Drive ID"
         echo -e "----  -------------------  ----------  --------  -------------------------------------"
@@ -694,6 +709,27 @@ show_disk_status() {
     done
 
     return 0
+}
+
+# Get filesystem type for a device using blkid
+get_fs_type() {
+    local device="$1"
+
+    if [ -b "$device" ]; then
+        # Run blkid to get the filesystem type
+        local fs_type=$(blkid -o value -s TYPE "$device" 2>/dev/null)
+
+        # Convert zfs_member to just zfs
+        if [ "$fs_type" = "zfs_member" ]; then
+            echo "zfs"
+        else
+            echo "${fs_type:-unknown}"
+        fi
+        return 0
+    fi
+
+    echo ""
+    return 1
 }
 
 # Get disk size in 1K blocks

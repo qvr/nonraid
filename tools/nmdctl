@@ -287,33 +287,13 @@ format_time_duration() {
     fi
 }
 
-# Show current array status
-show_status() {
-    if ! check_nmdstat_exists; then
-        return 1
-    fi
-
-    echo "=== NonRAID Array Status ==="
-    echo ""
-
-    # Get all values from nmdstat in one go
-    get_all_nmdstat_values NMDSTAT_VALUES
-
-    # Use values from the associative array
+# Show array summary information (state, label, superblock, disks present)
+show_array_summary() {
     local mdstate="${NMDSTAT_VALUES[mdState]}"
     local sblabel="${NMDSTAT_VALUES[sbLabel]}"
     local sbname="${NMDSTAT_VALUES[sbName]}"
     local mdnumdisks="${NMDSTAT_VALUES[mdNumDisks]}"
-    local mdnummissing="${NMDSTAT_VALUES[mdNumMissing]}"
-    local mdnuminvalid="${NMDSTAT_VALUES[mdNumInvalid]}"
 
-    # Get additional health indicators
-    local mdnumwrong="${NMDSTAT_VALUES[mdNumWrong]}"
-    local mdnumdisabled="${NMDSTAT_VALUES[mdNumDisabled]}"
-    local mdnumreplaced="${NMDSTAT_VALUES[mdNumReplaced]}"
-    local mdnumnew="${NMDSTAT_VALUES[mdNumNew]}"
-
-    # Display array summary
     echo -e "Array State   : $(format_array_state "$mdstate")"
     [ -n "$sblabel" ] && echo -e "Array Label   : $sblabel"
 
@@ -327,8 +307,18 @@ show_status() {
     fi
 
     echo -e "Disks Present : $mdnumdisks"
+}
 
-    # Check array health status based on various conditions
+# Determine array health status based on various conditions
+determine_array_health() {
+    local mdstate="${NMDSTAT_VALUES[mdState]}"
+    local mdnummissing="${NMDSTAT_VALUES[mdNumMissing]}"
+    local mdnuminvalid="${NMDSTAT_VALUES[mdNumInvalid]}"
+    local mdnumwrong="${NMDSTAT_VALUES[mdNumWrong]}"
+    local mdnumdisabled="${NMDSTAT_VALUES[mdNumDisabled]}"
+    local mdnumreplaced="${NMDSTAT_VALUES[mdNumReplaced]}"
+    local mdnumnew="${NMDSTAT_VALUES[mdNumNew]}"
+
     local health_status=""
     local health_details=""
 
@@ -395,8 +385,40 @@ show_status() {
     else
         echo ""
     fi
+}
 
-    # Calculate array size and parity information
+# Show current array status
+show_status() {
+    if ! check_nmdstat_exists; then
+        return 1
+    fi
+
+    echo "=== NonRAID Array Status ==="
+    echo ""
+
+    # Get all values from nmdstat in one go
+    get_all_nmdstat_values NMDSTAT_VALUES
+
+    # Show array summary (state, label, superblock, disks present)
+    show_array_summary
+
+    # Show array health status
+    determine_array_health
+
+    # Show array size and parity information
+    show_array_size_and_parity
+
+    # Show resync operation status if any
+    show_resync_status
+
+    # Show disk status
+    show_disk_status
+
+    return 0
+}
+
+# Display array size and parity information
+show_array_size_and_parity() {
     local has_parity=false
     local has_second_parity=false
     local data_size_gb=0
@@ -452,8 +474,10 @@ show_status() {
     else
         echo -e "${YELLOW}No Parity${NC}"
     fi
+}
 
-    # Check for reconstruction or check operations
+# Display resync operation status (reconstruction, clearing, check)
+show_resync_status() {
     local mdresync="${NMDSTAT_VALUES[mdResync]}"
     local mdresyncaction="${NMDSTAT_VALUES[mdResyncAction]}"
 
@@ -511,8 +535,74 @@ show_status() {
         echo -e "Elapsed Time  : $elapsed_formatted"
         echo -e "ETA           : $eta_formatted"
     fi
+}
 
-    # List all disks in the array
+# Calculate visible length of disk status for alignment
+get_status_visible_length() {
+    local status="$1"
+
+    case "$status" in
+        "DISK_OK")
+            echo "2" # "OK"
+            ;;
+        "DISK_INVALID")
+            echo "7" # "INVALID"
+            ;;
+        "DISK_NP_MISSING")
+            echo "7" # "MISSING"
+            ;;
+        "DISK_WRONG")
+            echo "5" # "WRONG"
+            ;;
+        "DISK_DSBL"|"DISK_NP_DSBL"|"DISK_DSBL_NEW")
+            echo "8" # "DISABLED"
+            ;;
+        "DISK_NEW")
+            echo "3" # "NEW"
+            ;;
+        *)
+            echo "${#status}" # Use raw length as fallback
+            ;;
+    esac
+}
+
+# Format and display a single disk entry in the array
+display_disk_entry() {
+    local idx="$1"
+    local slottype="$2"
+    local disksize="$3"
+    local diskid="$4"
+    local rdevname="$5"
+    local rdevstatus="$6"
+    local rdevnumerrors="${7:-0}"
+
+    # Convert size to GB
+    local sizegb=0
+    if [ -n "$disksize" ] && [ "$disksize" -gt 0 ]; then
+        sizegb=$(( (disksize + 1048575) / 1048576 ))
+    fi
+
+    local status_formatted=$(format_disk_status "$rdevstatus")
+
+    # Map status to visible text length for alignment
+    local visible_length=$(get_status_visible_length "$rdevstatus")
+
+    # Add indicator for disk errors
+    if [ -n "$rdevnumerrors" ] && [ "$rdevnumerrors" -gt 0 ]; then
+        status_formatted="$status_formatted ($rdevnumerrors errs)"
+        # Account for the extra text in the visible length
+        visible_length=$((visible_length + ${#rdevnumerrors} + 7))
+    fi
+
+    # Fix alignment with proper field widths - split into parts to handle color codes
+    printf "%-4s  " "${slottype:-$idx}"
+    printf "%s" "$status_formatted"
+    printf "%$((21 - visible_length))s" " " # Use visible length for padding
+    printf "%-16s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
+}
+
+# Display all disks in the array
+show_disk_status() {
     echo ""
     echo "=== Disk Status ==="
     echo ""
@@ -543,12 +633,6 @@ show_status() {
                 fi
             fi
 
-            # Convert size to GB
-            local sizegb=0
-            if [ -n "$disksize" ] && [ "$disksize" -gt 0 ]; then
-                sizegb=$(( (disksize + 1048575) / 1048576 ))
-            fi
-
             local slottype=""
             if [ "$idx" -eq 0 ]; then
                 slottype="P"
@@ -557,39 +641,7 @@ show_status() {
             fi
 
             if [ -n "$rdevstatus" ]; then
-                local status_formatted=$(format_disk_status "$rdevstatus")
-
-                # Map status to visible text length for alignment
-                local visible_length=0
-                case "$rdevstatus" in
-                    "DISK_OK")
-                        visible_length=2 # "OK"
-                        ;;
-                    "DISK_INVALID")
-                        visible_length=7 # "INVALID"
-                        ;;
-                    "DISK_NP_MISSING")
-                        visible_length=7 # "MISSING"
-                        ;;
-                    "DISK_WRONG")
-                        visible_length=5 # "WRONG"
-                        ;;
-                    "DISK_DSBL"|"DISK_NP_DSBL"|"DISK_DSBL_NEW")
-                        visible_length=8 # "DISABLED"
-                        ;;
-                    "DISK_NEW")
-                        visible_length=3 # "NEW"
-                        ;;
-                    *)
-                        visible_length=${#rdevstatus} # Use raw length as fallback
-                        ;;
-                esac
-
-                # Fix alignment with proper field widths - need special handling for color codes
-                printf "%-4s  " "$slottype"
-                printf "%s" "$status_formatted"
-                printf "%$((21 - visible_length))s" " " # Use visible length for padding
-                printf "%-16s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
+                display_disk_entry "$idx" "$slottype" "$disksize" "$diskid" "$rdevname" "$rdevstatus"
             fi
         fi
     done
@@ -619,52 +671,7 @@ show_status() {
                 fi
             fi
 
-            # Convert size to GB
-            local sizegb=0
-            if [ -n "$disksize" ] && [ "$disksize" -gt 0 ]; then
-                sizegb=$(( (disksize + 1048575) / 1048576 ))
-            fi
-
-            local status_formatted=$(format_disk_status "$rdevstatus")
-
-            # Map status to visible text length for alignment
-            local visible_length=0
-            case "$rdevstatus" in
-                "DISK_OK")
-                    visible_length=2 # "OK"
-                    ;;
-                "DISK_INVALID")
-                    visible_length=7 # "INVALID"
-                    ;;
-                "DISK_NP_MISSING")
-                    visible_length=7 # "MISSING"
-                    ;;
-                "DISK_WRONG")
-                    visible_length=5 # "WRONG"
-                    ;;
-                "DISK_DSBL"|"DISK_NP_DSBL"|"DISK_DSBL_NEW")
-                    visible_length=8 # "DISABLED"
-                    ;;
-                "DISK_NEW")
-                    visible_length=3 # "NEW"
-                    ;;
-                *)
-                    visible_length=${#rdevstatus} # Use raw length as fallback
-                    ;;
-            esac
-
-            # Add indicator for disk errors
-            if [ -n "$rdevnumerrors" ] && [ "$rdevnumerrors" -gt 0 ]; then
-                status_formatted="$status_formatted ($rdevnumerrors errs)"
-                # Account for the extra text in the visible length
-                visible_length=$((visible_length + ${#rdevnumerrors} + 7))
-            fi
-
-            # Fix alignment with proper field widths - split into parts to handle color codes
-            printf "%-4s  " "$idx"
-            printf "%s" "$status_formatted"
-            printf "%$((21 - visible_length))s" " " # Use visible length for padding
-            printf "%-16s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
+            display_disk_entry "$idx" "" "$disksize" "$diskid" "$rdevname" "$rdevstatus" "$rdevnumerrors"
         fi
     done
 

@@ -338,6 +338,7 @@ determine_array_health() {
         disks_num_errors=$((disks_num_errors + "${NMDSTAT_VALUES[rdevNumErrors.$slot]}"))
     done
 
+    local return_code=1
     # Check for critical error conditions first
     if [[ "$mdstate" = "ERROR:"* ]]; then
         health_status="${RED}ERROR${NC}"
@@ -383,6 +384,7 @@ determine_array_health() {
     else
         health_status="${GREEN}HEALTHY${NC}"
         health_details="All disks present and functioning"
+        return_code=0
     fi
 
     # Display the health status
@@ -392,6 +394,8 @@ determine_array_health() {
     else
         echo ""
     fi
+
+    return $return_code
 }
 
 # Show current array status
@@ -411,6 +415,7 @@ show_status() {
 
     # Show array health status
     determine_array_health
+    local array_health=$?
 
     # Show array size and parity information
     show_array_size_and_parity
@@ -421,7 +426,7 @@ show_status() {
     # Show disk status
     show_disk_status
 
-    return 0
+    return $array_health
 }
 
 # Display array size and parity information

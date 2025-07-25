@@ -42,6 +42,8 @@ usage() {
     echo "  reload                      Reload nonraid module with specified superblock"
     echo "  check                       Start parity check"
     echo "  nocheck [CANCEL|PAUSE]      Stop parity check (CANCEL or PAUSE)"
+    echo "  mount [MOUNTPREFIX]         Mount all active data disks (default prefix: /mnt/disk)"
+    echo "  unmount                     Unmount all active data disks"
     echo ""
     echo "Global Options:"
     echo "  -s, --super PATH            Superblock file path to use when loading the module (default: $DEFAULT_SUPERBLOCK)"
@@ -2053,6 +2055,245 @@ reload_module() {
     return 0
 }
 
+# Mount all active data disks with identified filesystems
+mount_array_disks() {
+    check_root
+
+    local mount_prefix="${1:-/mnt/disk}"
+
+    # Check if array is running
+    if ! check_nmdstat_exists; then
+        return 1
+    fi
+
+    # Get all values from nmdstat
+    get_all_nmdstat_values NMDSTAT_VALUES
+
+    local mdstate="${NMDSTAT_VALUES[mdState]}"
+    if [ "$mdstate" != "STARTED" ]; then
+        echo -e "${RED}Error: Array must be started before mounting disks${NC}"
+        echo -e "Current array state: $mdstate"
+        echo -e "Start the array with: ${YELLOW}nmdctl start${NC}"
+        return 1
+    fi
+
+    echo "=== Mounting NonRAID Array Disks ==="
+    echo ""
+    echo "Using mount prefix: $mount_prefix"
+    echo ""
+
+    local mounted_count=0
+    local skipped_count=0
+    local error_count=0
+
+    # Get all defined slots
+    local defined_slots=$(get_defined_slots)
+
+    # Process data disks (skip parity slots 0 and 29)
+    for slot in $defined_slots; do
+        # Skip parity disks (slots 0 and 29)
+        if [ "$slot" = "0" ] || [ "$slot" = "29" ]; then
+            continue
+        fi
+
+        local rdevname="${NMDSTAT_VALUES[rdevName.$slot]}"
+        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$slot]}"
+        local diskname="${NMDSTAT_VALUES[diskName.$slot]}"
+        local diskid="${NMDSTAT_VALUES[diskId.$slot]}"
+
+        # Skip slots with no device or not in DISK_OK status
+        if [ -z "$rdevname" ] || [ "$rdevname" = "none" ] || [ "$rdevstatus" != "DISK_OK" ]; then
+            continue
+        fi
+
+        # Get filesystem type and current mountpoint
+        local device="/dev/${diskname}"
+        local fs_type=$(get_fs_type "$device")
+        local current_mountpoint=$(get_mountpoint "$diskname" "$fs_type")
+
+        # Skip if no filesystem or already mounted
+        if [ -z "$fs_type" ] || [ "$fs_type" = "unknown" ]; then
+            echo -e "Slot $slot (${YELLOW}${diskname}${NC}): ${YELLOW}No filesystem detected${NC}"
+            skipped_count=$((skipped_count + 1))
+            continue
+        elif [ "$current_mountpoint" != "unmounted" ]; then
+            echo -e "Slot $slot (${BLUE}${diskname}${NC}): Already mounted at ${GREEN}$current_mountpoint${NC}"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+
+        # Handle mounting based on filesystem type
+        case "$fs_type" in
+            "zfs")
+                # For ZFS, we need to import the pool
+                local pool_name="disk${slot}"
+                echo -n "Slot $slot (${diskname}): Importing ZFS pool $pool_name... "
+
+                if zpool import -d "$device" "$pool_name" 2>/dev/null; then
+                    echo -e "${GREEN}SUCCESS${NC}"
+                    mounted_count=$((mounted_count + 1))
+                else
+                    echo -e "${RED}FAILED${NC}"
+                    error_count=$((error_count + 1))
+                fi
+                ;;
+
+            "xfs"|"ext4"|"ext3"|"ext2"|"btrfs"|*)
+                # Standard filesystems
+                local mountpoint="${mount_prefix}${slot}"
+
+                # Create mountpoint if it doesn't exist
+                if [ ! -d "$mountpoint" ]; then
+                    mkdir -p "$mountpoint"
+                fi
+
+                echo -n "Slot $slot (${diskname}): Mounting $fs_type to $mountpoint... "
+
+                if mount "$device" "$mountpoint" 2>/dev/null; then
+                    echo -e "${GREEN}SUCCESS${NC}"
+                    mounted_count=$((mounted_count + 1))
+                else
+                    echo -e "${RED}FAILED${NC}"
+                    error_count=$((error_count + 1))
+                fi
+                ;;
+        esac
+    done
+
+    echo ""
+    echo "Mount summary:"
+    echo -e "  ${GREEN}$mounted_count${NC} disks mounted successfully"
+    echo -e "  ${BLUE}$skipped_count${NC} disks skipped (already mounted or no filesystem)"
+    if [ $error_count -gt 0 ]; then
+        echo -e "  ${RED}$error_count${NC} disks failed to mount"
+        return 1
+    fi
+
+    return 0
+}
+
+# Unmount all active data disks
+unmount_array_disks() {
+    check_root
+
+    # Check if array is running
+    if ! check_nmdstat_exists; then
+        return 1
+    fi
+
+    # Get all values from nmdstat
+    get_all_nmdstat_values NMDSTAT_VALUES
+
+    local mdstate="${NMDSTAT_VALUES[mdState]}"
+    if [ "$mdstate" != "STARTED" ]; then
+        echo -e "${RED}Error: Array must be started to unmount disks properly${NC}"
+        echo -e "Current array state: $mdstate"
+        return 1
+    fi
+
+    echo "=== Unmounting NonRAID Array Disks ==="
+    echo ""
+
+    local unmounted_count=0
+    local skipped_count=0
+    local error_count=0
+
+    # Get all defined slots
+    local defined_slots=$(get_defined_slots)
+
+    # Process data disks (skip parity slots 0 and 29)
+    for slot in $defined_slots; do
+        # Skip parity disks (slots 0 and 29)
+        if [ "$slot" = "0" ] || [ "$slot" = "29" ]; then
+            continue
+        fi
+
+        local rdevname="${NMDSTAT_VALUES[rdevName.$slot]}"
+        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$slot]}"
+        local diskname="${NMDSTAT_VALUES[diskName.$slot]}"
+        local diskid="${NMDSTAT_VALUES[diskId.$slot]}"
+
+        # Skip slots with no device or not in DISK_OK status
+        if [ -z "$rdevname" ] || [ "$rdevname" = "none" ] || [ "$rdevstatus" != "DISK_OK" ]; then
+            continue
+        fi
+
+        # Get filesystem type and current mountpoint
+        local device="/dev/${diskname}"
+        local fs_type=$(get_fs_type "$device")
+        local current_mountpoint=$(get_mountpoint "$diskname" "$fs_type")
+
+        # Skip if no filesystem or already unmounted
+        if [ -z "$fs_type" ] || [ "$fs_type" = "unknown" ]; then
+            echo -e "Slot $slot (${YELLOW}${diskname}${NC}): ${YELLOW}No filesystem detected${NC}"
+            skipped_count=$((skipped_count + 1))
+            continue
+        elif [ "$current_mountpoint" = "unmounted" ]; then
+            echo -e "Slot $slot (${BLUE}${diskname}${NC}): Already unmounted"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+
+        # Handle unmounting based on filesystem type
+        case "$fs_type" in
+            "zfs")
+                # For ZFS, we need to export the pool
+                # Get the pool name that contains this device
+                local pool_name=""
+                if command -v zpool >/dev/null 2>&1; then
+                    pool_name=$(zpool list -H -o name,health | awk '{print $1}' | while read -r pool; do
+                        if zpool status "$pool" 2>/dev/null | grep -q "$diskname"; then
+                            echo "$pool"
+                            break
+                        fi
+                    done)
+                fi
+
+                if [ -n "$pool_name" ]; then
+                    echo -n "Slot $slot (${diskname}): Exporting ZFS pool $pool_name... "
+                    if zpool export "$pool_name" 2>/dev/null; then
+                        echo -e "${GREEN}SUCCESS${NC}"
+                        unmounted_count=$((unmounted_count + 1))
+                    else
+                        echo -e "${RED}FAILED${NC}"
+                        error_count=$((error_count + 1))
+                    fi
+                else
+                    echo -e "Slot $slot (${YELLOW}${diskname}${NC}): ${YELLOW}ZFS pool not found${NC}"
+                    skipped_count=$((skipped_count + 1))
+                fi
+                ;;
+
+            "xfs"|"ext4"|"ext3"|"ext2"|"btrfs"|*)
+                echo -n "Slot $slot (${diskname}): Unmounting from $current_mountpoint... "
+
+                # Try unmounting with increasing force if needed
+                if umount "$current_mountpoint" 2>/dev/null ||
+                   umount -f "$current_mountpoint" 2>/dev/null; then
+                    echo -e "${GREEN}SUCCESS${NC}"
+                    unmounted_count=$((unmounted_count + 1))
+                else
+                    echo -e "${RED}FAILED${NC} (Device may be busy)"
+                    echo -e "  You can check what's using it with: ${YELLOW}lsof $current_mountpoint${NC}"
+                    error_count=$((error_count + 1))
+                fi
+                ;;
+        esac
+    done
+
+    echo ""
+    echo "Unmount summary:"
+    echo -e "  ${GREEN}$unmounted_count${NC} disks unmounted successfully"
+    echo -e "  ${BLUE}$skipped_count${NC} disks skipped (already unmounted or no filesystem)"
+    if [ $error_count -gt 0 ]; then
+        echo -e "  ${RED}$error_count${NC} disks failed to unmount"
+        echo -e "${YELLOW}Note: Use 'fuser -m <mountpoint>' to see which processes are using the disk${NC}"
+        return 1
+    fi
+
+    return 0
+}
+
 # Main entry point
 main() {
     # Check for at least one argument
@@ -2128,6 +2369,12 @@ main() {
             ;;
         "nocheck")
             stop_check "$1"
+            ;;
+        "mount")
+            mount_array_disks "$1"
+            ;;
+        "unmount")
+            unmount_array_disks
             ;;
         *)
             echo -e "${RED}Error: Unknown command '$command'${NC}"

@@ -1,7 +1,9 @@
 #!/bin/bash
+# shellcheck disable=SC2155
 #
 # nmdctl - NonRAID array management utility
 #
+
 
 # Check for bash version 4 or higher (needed for associative arrays)
 if ((BASH_VERSINFO[0] < 4)); then
@@ -59,8 +61,7 @@ check_root() {
 # Run a command via nmdcmd
 run_nmd_command() {
     check_root
-    echo "$1" > /proc/nmdcmd
-    if [ $? -ne 0 ]; then
+    if ! echo "$1" > /proc/nmdcmd; then
         echo -e "${RED}Error: Failed to run command '$1'${NC}"
         return 1
     fi
@@ -73,7 +74,7 @@ check_module_loaded() {
     local is_create_command=0
 
     # Check if we're being called as part of the create command
-    local call_stack="${FUNCNAME[@]}"
+    local call_stack="${FUNCNAME[*]}"
     if [[ "$call_stack" == *"create_array"* ]]; then
         is_create_command=1
     fi
@@ -136,7 +137,7 @@ check_nmdstat_exists() {
     if [ ! -f /proc/nmdstat ]; then
         # Clear the NMDSTAT_VALUES array since /proc/nmdstat doesn't exist
         for key in "${!NMDSTAT_VALUES[@]}"; do
-            unset NMDSTAT_VALUES["$key"]
+            unset 'NMDSTAT_VALUES["$key"]'
         done
 
         # Try to load the module first if it's not loaded
@@ -162,7 +163,7 @@ get_all_nmdstat_values() {
 
     # Clear the array first
     for key in "${!array_ref[@]}"; do
-        unset array_ref["$key"]
+        unset 'array_ref["$key"]'
     done
 
     # Read all values from /proc/nmdstat
@@ -263,7 +264,7 @@ get_defined_slots() {
     # Extract slot numbers for keys matching diskId.X with non-empty values
     for key in "${!NMDSTAT_VALUES[@]}"; do
         if [[ $key =~ ^diskId\.([0-9]+)$ ]] && [ -n "${NMDSTAT_VALUES[$key]}" ]; then
-            slots+=(${BASH_REMATCH[1]})
+            slots+=("${BASH_REMATCH[1]}")
         fi
     done
 
@@ -335,7 +336,7 @@ determine_array_health() {
     done
 
     # Check for critical error conditions first
-    if [ "$mdstate" = "ERROR:"* ]; then
+    if [[ "$mdstate" = "ERROR:"* ]]; then
         health_status="${RED}ERROR${NC}"
         health_details="Array is in ERROR state"
     # Check if this is a new array
@@ -594,7 +595,7 @@ display_disk_entry() {
     if [ -n "$rdevnumerrors" ] && [ "$rdevnumerrors" -gt 0 ]; then
         status_formatted="$status_formatted ($rdevnumerrors errs)"
         # Account for the extra text in the visible length
-        visible_length=$((visible_length + ${#rdevnumerrors} + 7))
+        visible_length=$((visible_length + ${#rdevnumerrors} + 8))
     fi
 
     # Fix alignment with proper field widths - split into parts to handle color codes
@@ -778,7 +779,7 @@ get_mountpoint() {
                     # Check if the pool is mounted
                     local zfs_mounts=$(zfs list -H -o name,mountpoint | grep -v "none$")
                     # Start with the pool itself
-                    local found_mountpoint=$(echo "$zfs_mounts" | grep "^$pool[[:blank:]]" | awk '{print $2}' | head -1)
+                    local found_mountpoint=$(echo "$zfs_mounts" | grep "^${pool}[[:blank:]]" | awk '{print $2}' | head -1)
 
                     if [ -n "$found_mountpoint" ] && [ "$found_mountpoint" != "none" ]; then
                         mountpoint="$found_mountpoint"
@@ -878,30 +879,6 @@ get_disk_size_kb() {
     fi
 }
 
-# Get disk ID from /dev/disk/by-id
-get_disk_id() {
-    local device="$1"
-
-    # Get device name without /dev/
-    local devname=$(basename "$device")
-
-    # Use a safer approach to find the matching disk ID
-    local disk_id=""
-    if [ -d "/dev/disk/by-id" ]; then
-        for id_path in /dev/disk/by-id/*; do
-            if [ -L "$id_path" ] && [[ "$id_path" != *-part* ]]; then
-                local link_target=$(readlink -f "$id_path")
-                if [ "$(basename "$link_target")" = "$devname" ]; then
-                    disk_id=$(basename "$id_path")
-                    break
-                fi
-            fi
-        done
-    fi
-
-    echo "$disk_id"
-}
-
 # Find disk device name matching the ID in nmdstat
 find_matching_disk() {
     local disk_id="$1"
@@ -995,11 +972,9 @@ import_disks() {
                     # Get the configured size from nmdstat
                     local configured_size=$(get_nmdstat_value "diskSize.$slot")
                     local size_to_use="$disk_size"
-                    local size_mismatch=0
 
                     # If we have a configured size and it differs from actual size
                     if [ -n "$configured_size" ] && [ "$configured_size" -gt 0 ] && [ "$configured_size" -ne "$disk_size" ]; then
-                        size_mismatch=1
                         echo -e "${YELLOW}Warning: Size mismatch for disk in slot $slot${NC}"
                         echo -e "  Partition size: $disk_size KB"
                         echo -e "  Expected size : $configured_size KB"
@@ -1104,7 +1079,6 @@ start_array() {
     mdstate=$(get_nmdstat_value "mdState")
 
     # Check if all defined disks have been imported
-    local defined_slots=$(get_defined_slots_count)
     local imported_disks=0
     local missing_slots=()
 
@@ -1273,7 +1247,7 @@ list_available_devices() {
         fi
 
         # Check if the device has exactly one partition
-        local partition_count=$(ls -l ${dev}* 2>/dev/null | grep -E "${dev}[0-9]+" | wc -l)
+        local partition_count=$(ls -l ${dev}* 2>/dev/null | grep -cE "${dev}[0-9]+")
         if [ "$partition_count" -eq 1 ]; then
             # Get the partition device
             local partition=""
@@ -1453,7 +1427,8 @@ create_array() {
 
             if [ -n "$slot" ]; then
                 # Check if slot is already assigned
-                if [[ " ${assigned_slots[@]} " =~ " $slot " ]]; then
+                # shellcheck disable=SC2076
+                if [[ " ${assigned_slots[*]} " =~ " $slot " ]]; then
                     echo -e "${RED}Error: Slot $slot is already assigned. Please choose another slot.${NC}"
                     continue
                 fi
@@ -1651,7 +1626,8 @@ add_disk() {
 
     # Then, determine which slots are available
     for slot in $(seq 1 28); do
-        if ! [[ " ${used_slots[@]} " =~ " $slot " ]]; then
+        # shellcheck disable=SC2076
+        if ! [[ " ${used_slots[*]} " =~ " $slot " ]]; then
             available_slots+=("$slot")
         fi
     done
@@ -1660,11 +1636,11 @@ add_disk() {
     local has_parity=false
     local has_second_parity=false
 
-    if [[ " ${used_slots[@]} " =~ " 0 " ]]; then
+    if [[ " ${used_slots[*]} " =~ " 0 " ]]; then
         has_parity=true
     fi
 
-    if [[ " ${used_slots[@]} " =~ " 29 " ]]; then
+    if [[ " ${used_slots[*]} " =~ " 29 " ]]; then
         has_second_parity=true
     fi
 
@@ -1794,7 +1770,8 @@ add_disk() {
         fi
 
         # Check if selected slot is available
-        if ! [[ " ${available_slots[@]} " =~ " $choice " ]]; then
+        # shellcheck disable=SC2076
+        if ! [[ " ${available_slots[*]} " =~ " $choice " ]]; then
             echo -e "${RED}Invalid slot. Please choose from available slots: ${available_slots[*]}.${NC}"
             continue
         fi
@@ -2021,8 +1998,7 @@ reload_module() {
     # Check if module is loaded
     if ! lsmod | grep -q nonraid; then
         echo -e "${YELLOW}NonRAID module not loaded. Loading with superblock: $superblock${NC}"
-        modprobe nonraid super="$superblock"
-        if [ $? -ne 0 ]; then
+        if ! modprobe nonraid super="$superblock"; then
             echo -e "${RED}Error: Failed to load nonraid module${NC}"
             return 1
         fi
@@ -2048,8 +2024,7 @@ reload_module() {
 
     # Unload module
     echo "Unloading nonraid module..."
-    modprobe -r nonraid
-    if [ $? -ne 0 ]; then
+    if ! modprobe -r nonraid; then
         echo -e "${RED}Error: Failed to unload nonraid module. It may be in use.${NC}"
         return 1
     fi
@@ -2059,8 +2034,7 @@ reload_module() {
 
     # Load module with specified superblock
     echo "Loading nonraid module with superblock: $superblock"
-    modprobe nonraid super="$superblock"
-    if [ $? -ne 0 ]; then
+    if ! modprobe nonraid super="$superblock"; then
         echo -e "${RED}Error: Failed to reload nonraid module${NC}"
         return 1
     fi

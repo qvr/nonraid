@@ -1,5 +1,5 @@
 #!/bin/bash
-# shellcheck disable=SC2155
+# shellcheck disable=SC2155,SC2207
 #
 # nmdctl - NonRAID array management utility
 #
@@ -116,8 +116,7 @@ check_module_loaded() {
             echo -e "${YELLOW}A new superblock will be created when the array is started${NC}"
         fi
 
-        modprobe nonraid super="$superblock"
-        if [ $? -ne 0 ]; then
+        if ! modprobe nonraid super="$superblock"; then
             echo -e "${RED}Error: Failed to load nonraid module${NC}"
             return 1
         fi
@@ -126,8 +125,7 @@ check_module_loaded() {
     else
         echo -e "${RED}Error: nonraid module is not loaded${NC}"
         echo -e "Superblock file not found: $superblock"
-        echo -e "Please load the module with: ${YELLOW}modprobe nonraid super=/path/to/superblock.dat${NC}"
-        echo -e "Or specify superblock with: ${YELLOW}nmdctl --super /path/to/superblock.dat ...${NC}"
+        echo -e "To create an array with this new superblock, run: ${YELLOW}nmdctl --super $superblock create${NC}"
         return 1
     fi
 }
@@ -530,7 +528,7 @@ show_resync_status() {
 
         # Calculate elapsed time (mdResyncDt is in seconds)
         local elapsed_time=$mdresyncdt
-        local elapsed_formatted=$(format_time_duration $elapsed_time)
+        local elapsed_formatted=$(format_time_duration "$elapsed_time")
 
         # Calculate estimated time remaining
         local eta_seconds=0
@@ -674,7 +672,7 @@ show_disk_status() {
             local rdevnumerrors="${NMDSTAT_VALUES[rdevNumErrors.$idx]}"
 
             # For DISK_NEW, get size from rdevSize instead of diskSize
-            if [[ ("$rdevstatus" = "DISK_NEW" || "$rdevstatus" = "DISK_DSBL_NEW") ]] && [ -z "$disksize" -o "$disksize" = "0" ]; then
+            if [[ ("$rdevstatus" = "DISK_NEW" || "$rdevstatus" = "DISK_DSBL_NEW") ]] && { [ -z "$disksize" ] || [ "$disksize" = "0" ]; }; then
                 local rdevsize="${NMDSTAT_VALUES[rdevSize.$idx]}"
                 if [ -n "$rdevsize" ] && [ "$rdevsize" -gt 0 ]; then
                     disksize="$rdevsize"
@@ -712,7 +710,7 @@ show_disk_status() {
             local rdevnumerrors="${NMDSTAT_VALUES[rdevNumErrors.$idx]}"
 
             # For DISK_NEW, get size from rdevSize instead of diskSize
-            if [ "$rdevstatus" = "DISK_NEW" ] && [ -z "$disksize" -o "$disksize" = "0" ]; then
+            if [ "$rdevstatus" = "DISK_NEW" ] && { [ -z "$disksize" ] || [ "$disksize" = "0" ]; }; then
                 local rdevsize="${NMDSTAT_VALUES[rdevSize.$idx]}"
                 if [ -n "$rdevsize" ] && [ "$rdevsize" -gt 0 ]; then
                     disksize="$rdevsize"
@@ -779,7 +777,7 @@ get_mountpoint() {
             # For ZFS, we need to identify the pool name and dataset
             # Get ZFS pool name that contains this device
             if command -v zpool >/dev/null 2>&1; then
-                local pool=$(zpool list -H -o name,health | awk '{print $1}' | while read pool; do
+                local pool=$(zpool list -H -o name,health | awk '{print $1}' | while read -r pool; do
                     if zpool status "$pool" 2>/dev/null | grep -q "$device"; then
                         echo "$pool"
                         break
@@ -991,7 +989,7 @@ import_disks() {
                         echo -e "  Expected size : $configured_size KB"
 
                         # Ask for confirmation
-                        read -p "Use the configured size instead of detected size? (y/N): " confirm
+                        read -r -p "Use the configured size instead of detected size? (y/N): " confirm
                         if [[ "$confirm" =~ ^[Yy]$ ]]; then
                             size_to_use="$configured_size"
                             echo -e "Using configured size: ${BLUE}$configured_size KB${NC}"
@@ -1023,6 +1021,7 @@ import_disks() {
     if [ "$num_disks" -eq 0 ]; then
         # Check if disks were already imported (check for any rdevName values)
         local already_imported=0
+        # shellcheck disable=SC2013
         for slot in $(grep -E "^diskId\.[0-9]+" /proc/nmdstat | cut -d'.' -f2 | cut -d'=' -f1); do
             local rdevname=$(get_nmdstat_value "rdevName.$slot")
             if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
@@ -1147,7 +1146,7 @@ start_array() {
         esac
 
         # Ask for confirmation
-        read -p "Do you want to continue starting the array in this state? (y/N): " confirm
+        read -r -p "Do you want to continue starting the array in this state? (y/N): " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             echo "Proceeding with array start in $mdstate state"
             if ! run_nmd_command "start $mdstate"; then
@@ -1258,7 +1257,7 @@ list_available_devices() {
         fi
 
         # Check if the device has exactly one partition
-        local partition_count=$(ls -l ${dev}* 2>/dev/null | grep -cE "${dev}[0-9]+")
+        local partition_count=$(grep -c "$(basename "${dev}")[0-9]" /proc/partitions)
         if [ "$partition_count" -eq 1 ]; then
             # Get the partition device
             local partition=""
@@ -1357,7 +1356,7 @@ create_array() {
 
     # Ask for array label
     local array_label=""
-    read -p "Enter a label for the array (optional): " array_label
+    read -r -p "Enter a label for the array (optional): " array_label
     if [ -n "$array_label" ]; then
         # Set array label if provided
         echo "Setting array label: $array_label"
@@ -1403,7 +1402,7 @@ create_array() {
             echo -e " 1-28: Data disk"
             echo -e " s: Skip this disk"
             echo -e " f: Finish array creation"
-            read -p "Choice: " choice
+            read -r -p "Choice: " choice
 
             local slot=""
             case "$choice" in
@@ -1479,7 +1478,7 @@ create_array() {
 
     # Ask if user wants to start the array now
     echo ""
-    read -p "Do you want to start the array now? (y/N): " start_now
+    read -r -p "Do you want to start the array now? (y/N): " start_now
     if [[ "$start_now" =~ ^[Yy]$ ]]; then
         start_array
     else
@@ -1536,7 +1535,7 @@ add_disk() {
     if [ "$imported_disks" -lt "$total_slots" ]; then
         echo -e "${YELLOW}Warning: Not all disks have been imported ($imported_disks/$total_slots)${NC}"
         echo -e "${YELLOW}It's recommended to import all existing disks before adding a new one${NC}"
-        read -p "Continue anyway? (y/N): " confirm
+        read -rp "Continue anyway? (y/N): " confirm
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             echo "Operation cancelled."
             return 1
@@ -1720,7 +1719,7 @@ add_disk() {
 
     # Select device
     while true; do
-        read -p "Enter device number to add (1-${#available_devices[@]}) or 'q' to quit: " choice
+        read -r -p "Enter device number to add (1-${#available_devices[@]}) or 'q' to quit: " choice
 
         if [ "$choice" = "q" ] || [ "$choice" = "Q" ]; then
             echo "Operation cancelled."
@@ -1758,7 +1757,7 @@ add_disk() {
         echo -e " Q or 29: Second parity disk (optional)"
         echo -e " 1-28: Data disk"
         echo -e " a: Abort adding disk"
-        read -p "Choice: " choice
+        read -r -p "Choice: " choice
 
         if [ "$choice" = "a" ] || [ "$choice" = "A" ]; then
             echo "Operation cancelled."
@@ -1804,7 +1803,7 @@ add_disk() {
 
     # Confirm selection
     echo -e "You are about to add: ${BLUE}$(basename "$selected_dev")${NC} to slot ${BLUE}$slot_display${NC}"
-    read -p "Proceed with adding this disk? (y/N): " confirm
+    read -r -p "Proceed with adding this disk? (y/N): " confirm
 
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         echo "Operation cancelled."
@@ -1948,7 +1947,7 @@ unassign_disk() {
     echo ""
 
     # Ask for confirmation
-    read -p "Are you sure you want to unassign this disk? (y/N): " confirm
+    read -r -p "Are you sure you want to unassign this disk? (y/N): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         echo "Operation cancelled."
         return 1
@@ -1998,7 +1997,7 @@ reload_module() {
         echo -e "${YELLOW}This will create a new superblock when the array is started.${NC}"
 
         # Ask for confirmation if creating a new superblock
-        read -p "Continue with a new superblock? (y/N): " confirm
+        read -r -p "Continue with a new superblock? (y/N): " confirm
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             echo "Operation cancelled."
             return 1

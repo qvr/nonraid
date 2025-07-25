@@ -208,6 +208,22 @@ get_defined_slots() {
     grep -E "^diskId\.[0-9]+=[^=]+" /proc/nmdstat | cut -d'.' -f2 | cut -d'=' -f1
 }
 
+# Format time duration in seconds to a human-readable format (HH:MM:SS)
+format_time_duration() {
+    local seconds=$1
+    local hours=$(( seconds / 3600 ))
+    local minutes=$(( (seconds % 3600) / 60 ))
+    local secs=$(( seconds % 60 ))
+
+    if [ "$hours" -gt 0 ]; then
+        printf "%d:%02d:%02d" "$hours" "$minutes" "$secs"
+    elif [ "$minutes" -gt 0 ]; then
+        printf "%d:%02d" "$minutes" "$secs"
+    else
+        printf "%d sec" "$secs"
+    fi
+}
+
 # Show current array status
 show_status() {
     if ! check_nmdstat_exists; then
@@ -404,10 +420,30 @@ show_status() {
             rate=$(( mdresyncdb / mdresyncdt ))
         fi
 
+        # Convert rate from KB/s to MB/s (using bash arithmetic for compatibility)
+        local rate_mb_int=$(( rate * 100 / 1024 ))
+        local rate_mb_whole=$(( rate_mb_int / 100 ))
+        local rate_mb_frac=$(( rate_mb_int % 100 ))
+        local rate_mb="${rate_mb_whole}.$(printf "%02d" $rate_mb_frac)"
+
+        # Calculate elapsed time (mdResyncDt is in seconds)
+        local elapsed_time=$mdresyncdt
+        local elapsed_formatted=$(format_time_duration $elapsed_time)
+
+        # Calculate estimated time remaining
+        local eta_seconds=0
+        if [ "$rate" -gt 0 ] && [ "$mdresyncsize" -gt "$mdresyncpos" ]; then
+            local remaining_blocks=$(( mdresyncsize - mdresyncpos ))
+            eta_seconds=$(( remaining_blocks / rate ))
+        fi
+        local eta_formatted=$(format_time_duration $eta_seconds)
+
         echo ""
         echo -e "Operation     : ${BLUE}$mdresyncaction${NC}"
         echo -e "Progress      : $progress% ($mdresyncpos/$mdresyncsize blocks)"
-        echo -e "Speed         : $rate KB/s"
+        echo -e "Speed         : $rate_mb MB/s"
+        echo -e "Elapsed Time  : $elapsed_formatted"
+        echo -e "ETA           : $eta_formatted"
     fi
 
     # List all disks in the array

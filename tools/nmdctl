@@ -3,6 +3,12 @@
 # nmdctl - NonRAID array management utility
 #
 
+# Check for bash version 4 or higher (needed for associative arrays)
+if ((BASH_VERSINFO[0] < 4)); then
+    echo "Error: This script requires bash version 4 or higher"
+    exit 1
+fi
+
 # Colors for pretty output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -13,6 +19,9 @@ NC='\033[0m' # No Color
 # Default superblock path
 DEFAULT_SUPERBLOCK="/nonraid.dat"
 SUPERBLOCK_PATH=""
+
+# Global associative array for nmdstat values
+declare -A NMDSTAT_VALUES
 
 # Display usage information
 usage() {
@@ -73,7 +82,11 @@ check_module_loaded() {
     if lsmod | grep -q nonraid; then
         # For create_array, verify the module is using the correct superblock
         if [ "$is_create_command" -eq 1 ] && [ -f /proc/nmdstat ]; then
-            local current_superblock=$(get_nmdstat_value "sbName")
+            # Get all nmdstat values if we haven't already
+            if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
+                get_all_nmdstat_values NMDSTAT_VALUES
+            fi
+            local current_superblock="${NMDSTAT_VALUES[sbName]}"
 
             # If the current superblock doesn't match what we want to use
             if [ "$current_superblock" != "$superblock" ] && [ -n "$current_superblock" ] && [ "$current_superblock" != "(null)" ]; then
@@ -121,6 +134,11 @@ check_module_loaded() {
 # Check if /proc/nmdstat exists
 check_nmdstat_exists() {
     if [ ! -f /proc/nmdstat ]; then
+        # Clear the NMDSTAT_VALUES array since /proc/nmdstat doesn't exist
+        for key in "${!NMDSTAT_VALUES[@]}"; do
+            unset NMDSTAT_VALUES["$key"]
+        done
+
         # Try to load the module first if it's not loaded
         if ! lsmod | grep -q nonraid; then
             check_module_loaded
@@ -136,7 +154,27 @@ check_nmdstat_exists() {
     return 0
 }
 
-# Get value from nmdstat
+# Get all values from nmdstat and store them in an associative array
+# Usage: get_all_nmdstat_values nmdstat_array
+# Afterward, access values with ${nmdstat_array["key"]}
+get_all_nmdstat_values() {
+    local -n array_ref=$1
+
+    # Clear the array first
+    for key in "${!array_ref[@]}"; do
+        unset array_ref["$key"]
+    done
+
+    # Read all values from /proc/nmdstat
+    while IFS='=' read -r key value; do
+        array_ref["$key"]="$value"
+    done < <(cat /proc/nmdstat 2>/dev/null)
+
+    # Return success only if we read something
+    [ ${#array_ref[@]} -gt 0 ]
+}
+
+# Get value from nmdstat (for backward compatibility)
 get_nmdstat_value() {
     grep -E "^$1=" /proc/nmdstat | cut -d= -f2
 }
@@ -197,15 +235,40 @@ format_array_state() {
 # Get count of defined disk slots in the array
 # Returns the count of all slots with a defined disk
 get_defined_slots_count() {
-    # We check for non-empty diskId values
-    grep -c -E "^diskId\.[0-9]+=[^=]+" /proc/nmdstat
+    # If NMDSTAT_VALUES is empty, populate it first
+    if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
+        get_all_nmdstat_values NMDSTAT_VALUES
+    fi
+
+    local count=0
+    # Count all keys matching diskId.X with non-empty values
+    for key in "${!NMDSTAT_VALUES[@]}"; do
+        if [[ $key =~ ^diskId\.[0-9]+$ ]] && [ -n "${NMDSTAT_VALUES[$key]}" ]; then
+            count=$((count + 1))
+        fi
+    done
+
+    echo "$count"
 }
 
 # Get array of defined slot numbers
 # Returns space-separated list of slot numbers that have disks defined
 get_defined_slots() {
-    # Extract just the slot numbers for slots with defined disks
-    grep -E "^diskId\.[0-9]+=[^=]+" /proc/nmdstat | cut -d'.' -f2 | cut -d'=' -f1
+    # If NMDSTAT_VALUES is empty, populate it first
+    if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
+        get_all_nmdstat_values NMDSTAT_VALUES
+    fi
+
+    local slots=()
+    # Extract slot numbers for keys matching diskId.X with non-empty values
+    for key in "${!NMDSTAT_VALUES[@]}"; do
+        if [[ $key =~ ^diskId\.([0-9]+)$ ]] && [ -n "${NMDSTAT_VALUES[$key]}" ]; then
+            slots+=(${BASH_REMATCH[1]})
+        fi
+    done
+
+    # Sort the slots numerically and output as space-separated list
+    printf "%s\n" "${slots[@]}" | sort -n | tr '\n' ' '
 }
 
 # Format time duration in seconds to a human-readable format (HH:MM:SS)
@@ -233,19 +296,22 @@ show_status() {
     echo "=== NonRAID Array Status ==="
     echo ""
 
-    # Get basic array info
-    local mdstate=$(get_nmdstat_value "mdState")
-    local sblabel=$(get_nmdstat_value "sbLabel")
-    local sbname=$(get_nmdstat_value "sbName")
-    local mdnumdisks=$(get_nmdstat_value "mdNumDisks")
-    local mdnummissing=$(get_nmdstat_value "mdNumMissing")
-    local mdnuminvalid=$(get_nmdstat_value "mdNumInvalid")
+    # Get all values from nmdstat in one go
+    get_all_nmdstat_values NMDSTAT_VALUES
+
+    # Use values from the associative array
+    local mdstate="${NMDSTAT_VALUES[mdState]}"
+    local sblabel="${NMDSTAT_VALUES[sbLabel]}"
+    local sbname="${NMDSTAT_VALUES[sbName]}"
+    local mdnumdisks="${NMDSTAT_VALUES[mdNumDisks]}"
+    local mdnummissing="${NMDSTAT_VALUES[mdNumMissing]}"
+    local mdnuminvalid="${NMDSTAT_VALUES[mdNumInvalid]}"
 
     # Get additional health indicators
-    local mdnumwrong=$(get_nmdstat_value "mdNumWrong")
-    local mdnumdisabled=$(get_nmdstat_value "mdNumDisabled")
-    local mdnumreplaced=$(get_nmdstat_value "mdNumReplaced")
-    local mdnumnew=$(get_nmdstat_value "mdNumNew")
+    local mdnumwrong="${NMDSTAT_VALUES[mdNumWrong]}"
+    local mdnumdisabled="${NMDSTAT_VALUES[mdNumDisabled]}"
+    local mdnumreplaced="${NMDSTAT_VALUES[mdNumReplaced]}"
+    local mdnumnew="${NMDSTAT_VALUES[mdNumNew]}"
 
     # Display array summary
     echo -e "Array State   : $(format_array_state "$mdstate")"
@@ -272,7 +338,7 @@ show_status() {
     # Count how many disks have been imported
     local imported_disks=0
     for slot in $(get_defined_slots); do
-        local rdevname=$(get_nmdstat_value "rdevName.$slot")
+        local rdevname="${NMDSTAT_VALUES[rdevName.$slot]}"
         if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
             imported_disks=$((imported_disks + 1))
         fi
@@ -338,27 +404,27 @@ show_status() {
     local second_parity_size_gb=0
 
     # Check slots 0 and 29 for parity disks
-    local parity_disk_size=$(get_nmdstat_value "diskSize.0")
+    local parity_disk_size="${NMDSTAT_VALUES[diskSize.0]}"
     if [ -n "$parity_disk_size" ] && [ "$parity_disk_size" -gt 0 ]; then
         has_parity=true
         parity_size_gb=$(( (parity_disk_size + 1048575) / 1048576 ))
     fi
 
     # Check P state
-    local parity_disk_status=$(get_nmdstat_value "rdevStatus.0")
+    local parity_disk_status="${NMDSTAT_VALUES[rdevStatus.0]}"
     if [[ "$parity_disk_status" == DISK_NP* ]] || [ "$parity_disk_status" = "DISK_DSBL_NEW" ] || [ "$parity_disk_status" = "DISK_INVALID" ]; then
         # P missing or new, don't count it yet
         has_parity=false
     fi
 
-    local second_parity_disk_size=$(get_nmdstat_value "diskSize.29")
+    local second_parity_disk_size="${NMDSTAT_VALUES[diskSize.29]}"
     if [ -n "$second_parity_disk_size" ] && [ "$second_parity_disk_size" -gt 0 ]; then
         has_second_parity=true
         second_parity_size_gb=$(( (second_parity_disk_size + 1048575) / 1048576 ))
     fi
 
     # Check Q state
-    local second_parity_disk_status=$(get_nmdstat_value "rdevStatus.29")
+    local second_parity_disk_status="${NMDSTAT_VALUES[rdevStatus.29]}"
     if [[ "$second_parity_disk_status" == DISK_NP* ]] || [ "$second_parity_disk_status" = "DISK_DSBL_NEW" ] || [ "$second_parity_disk_status" = "DISK_INVALID" ]; then
         # Q missing or new, don't count it yet
         has_second_parity=false
@@ -367,7 +433,7 @@ show_status() {
     # Count data disks and sum their sizes
     local data_disk_count=0
     for slot in $(seq 1 28); do
-        local disk_size=$(get_nmdstat_value "diskSize.$slot")
+        local disk_size="${NMDSTAT_VALUES[diskSize.$slot]}"
         if [ -n "$disk_size" ] && [ "$disk_size" -gt 0 ]; then
             data_disk_count=$((data_disk_count + 1))
             data_size_gb=$((data_size_gb + (disk_size + 1048575) / 1048576))
@@ -388,8 +454,8 @@ show_status() {
     fi
 
     # Check for reconstruction or check operations
-    local mdresync=$(get_nmdstat_value "mdResync")
-    local mdresyncaction=$(get_nmdstat_value "mdResyncAction")
+    local mdresync="${NMDSTAT_VALUES[mdResync]}"
+    local mdresyncaction="${NMDSTAT_VALUES[mdResyncAction]}"
 
     # Check for pending disk clearing
     if [ "$mdresync" = "0" ] && [ "$mdresyncaction" = "clear" ]; then
@@ -403,10 +469,10 @@ show_status() {
         echo -e "${YELLOW}Start the array and use '${GREEN}nmdctl check${YELLOW}' command to start the reconstruction${NC}"
     # Check for active reconstruction or check operation
     elif [ "$mdresync" != "0" ] && [ -n "$mdresync" ]; then
-        local mdresyncpos=$(get_nmdstat_value "mdResyncPos")
-        local mdresyncsize=$(get_nmdstat_value "mdResyncSize")
-        local mdresyncdt=$(get_nmdstat_value "mdResyncDt")
-        local mdresyncdb=$(get_nmdstat_value "mdResyncDb")
+        local mdresyncpos="${NMDSTAT_VALUES[mdResyncPos]}"
+        local mdresyncsize="${NMDSTAT_VALUES[mdResyncSize]}"
+        local mdresyncdt="${NMDSTAT_VALUES[mdResyncDt]}"
+        local mdresyncdb="${NMDSTAT_VALUES[mdResyncDb]}"
 
         # Calculate progress percentage
         local progress=0
@@ -455,25 +521,25 @@ show_status() {
 
     # Special handling for parity disks
     for idx in 0 29; do
-        local diskname=$(get_nmdstat_value "diskName.$idx")
-        local diskid=$(get_nmdstat_value "diskId.$idx")
-        local rdevstatus=$(get_nmdstat_value "rdevStatus.$idx")
+        local diskname="${NMDSTAT_VALUES[diskName.$idx]}"
+        local diskid="${NMDSTAT_VALUES[diskId.$idx]}"
+        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$idx]}"
 
         # Always display P, display Q if it has an ID OR it's a newly assigned disk (DISK_*_NEW)
         if [ "$idx" -eq 0 ] || [ -n "$diskid" ] || [[ "$rdevstatus" == DISK_*_NEW ]]; then
-            local disksize=$(get_nmdstat_value "diskSize.$idx")
-            local rdevname=$(get_nmdstat_value "rdevName.$idx")
+            local disksize="${NMDSTAT_VALUES[diskSize.$idx]}"
+            local rdevname="${NMDSTAT_VALUES[rdevName.$idx]}"
 
             # For DISK_NEW, get size from rdevSize instead of diskSize
             if [[ ("$rdevstatus" = "DISK_NEW" || "$rdevstatus" = "DISK_DSBL_NEW") ]] && [ -z "$disksize" -o "$disksize" = "0" ]; then
-                local rdevsize=$(get_nmdstat_value "rdevSize.$idx")
+                local rdevsize="${NMDSTAT_VALUES[rdevSize.$idx]}"
                 if [ -n "$rdevsize" ] && [ "$rdevsize" -gt 0 ]; then
                     disksize="$rdevsize"
                 fi
 
                 # If diskId is empty but rdevId exists, use that
                 if [ -z "$diskid" ]; then
-                    diskid=$(get_nmdstat_value "rdevId.$idx")
+                    diskid="${NMDSTAT_VALUES[rdevId.$idx]}"
                 fi
             fi
 
@@ -530,26 +596,26 @@ show_status() {
 
     # Now list data disks
     for idx in $(seq 1 28); do
-        local diskname=$(get_nmdstat_value "diskName.$idx")
-        local rdevstatus=$(get_nmdstat_value "rdevStatus.$idx")
+        local diskname="${NMDSTAT_VALUES[diskName.$idx]}"
+        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$idx]}"
 
         # Display disk if it has a name OR it's a newly assigned disk (DISK_NEW)
         if [ -n "$diskname" ] || [ "$rdevstatus" = "DISK_NEW" ]; then
-            local disksize=$(get_nmdstat_value "diskSize.$idx")
-            local diskid=$(get_nmdstat_value "diskId.$idx")
-            local rdevname=$(get_nmdstat_value "rdevName.$idx")
-            local rdevnumerrors=$(get_nmdstat_value "rdevNumErrors.$idx")
+            local disksize="${NMDSTAT_VALUES[diskSize.$idx]}"
+            local diskid="${NMDSTAT_VALUES[diskId.$idx]}"
+            local rdevname="${NMDSTAT_VALUES[rdevName.$idx]}"
+            local rdevnumerrors="${NMDSTAT_VALUES[rdevNumErrors.$idx]}"
 
             # For DISK_NEW, get size from rdevSize instead of diskSize
             if [ "$rdevstatus" = "DISK_NEW" ] && [ -z "$disksize" -o "$disksize" = "0" ]; then
-                local rdevsize=$(get_nmdstat_value "rdevSize.$idx")
+                local rdevsize="${NMDSTAT_VALUES[rdevSize.$idx]}"
                 if [ -n "$rdevsize" ] && [ "$rdevsize" -gt 0 ]; then
                     disksize="$rdevsize"
                 fi
 
                 # If diskId is empty but rdevId exists, use that
                 if [ -z "$diskid" ]; then
-                    diskid=$(get_nmdstat_value "rdevId.$idx")
+                    diskid="${NMDSTAT_VALUES[rdevId.$idx]}"
                 fi
             fi
 

@@ -327,12 +327,15 @@ determine_array_health() {
     local total_slots=$(get_defined_slots_count)
 
     # Count how many disks have been imported
+    # and how many read/write errors there are
     local imported_disks=0
+    local disks_num_errors=0
     for slot in $(get_defined_slots); do
         local rdevname="${NMDSTAT_VALUES[rdevName.$slot]}"
         if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
             imported_disks=$((imported_disks + 1))
         fi
+        disks_num_errors=$((disks_num_errors + "${NMDSTAT_VALUES[rdevNumErrors.$slot]}"))
     done
 
     # Check for critical error conditions first
@@ -370,6 +373,9 @@ determine_array_health() {
         # Remove trailing comma and space
         health_details=${issues%, }
     # Check if array is stopped but healthy
+    elif [ "$disks_num_errors" -gt 0 ]; then
+        health_status="${YELLOW}WARNING${NC}"
+        health_details="All disks present, but some have read or write errors ($disks_num_errors total)"
     elif [ "$mdstate" = "STOPPED" ]; then
         health_status="${YELLOW}READY${NC}"
         health_details="All disks imported but array is not started"
@@ -593,7 +599,7 @@ display_disk_entry() {
 
     # Add indicator for disk errors
     if [ -n "$rdevnumerrors" ] && [ "$rdevnumerrors" -gt 0 ]; then
-        status_formatted="$status_formatted ($rdevnumerrors errs)"
+        status_formatted="$status_formatted $(echo -e "${RED}($rdevnumerrors errs)${NC}")"
         # Account for the extra text in the visible length
         visible_length=$((visible_length + ${#rdevnumerrors} + 8))
     fi

@@ -1,8 +1,8 @@
 # NonRAID - unRAID storage array compatible kernel driver
 
-NonRAID is an fork of the unRAID system's open-source `md_unraid` kernel driver for supported kernels, but targeting primarily Ubuntu 24.04 LTS, enabling UnRAID-style storage arrays with parity protection outside of the commercial UnRAID system.
+NonRAID is a fork of the unRAID system's open-source `md_unraid` kernel driver for supported kernels, but targeting primarily Ubuntu 24.04 LTS, enabling UnRAID-style storage arrays with parity protection outside of the commercial UnRAID system.
 
-Unlike in UnRAID, where the driver replaces kernels standard `md` driver, the NonRAID driver has been separated into it's own kernel module (`md_nonraid`). This allows it to be easily added as a DKMS module on Ubuntu and Debian based systems, without needing to patch the kernel or replace the standard `md` driver. We do however replace the standard `raid6_pq` module with our patched version, as the upstream driver depends on those patches for the parity calculations.
+Unlike in UnRAID, where the driver replaces the kernel's standard `md` driver, the NonRAID driver has been separated into it's own kernel module (`md_nonraid`). This allows it to be easily added as a DKMS module on Ubuntu and Debian based systems, without needing to patch the kernel or replace the standard `md` driver. We do however replace the standard `raid6_pq` module with our patched version, as the upstream driver depends on those patches for the parity calculations.
 
 While this is a fork, we try to keep the changes to driver minimal to make syncs with upstream easier. The driver currently has patches to rebrand and separate the module from `md`, and a single patch to prevent kernel crashes if starting the array without importing all disks first.
 
@@ -24,33 +24,101 @@ sudo update-initramfs -u -k all
 > [!NOTE]
 > Updating the initramfs is needed to make sure the new `raid6_pq` module is used, as otherwise the unpatched module gets loaded by other modules depending on it during initramfs, at least on Ubuntu 24.04. Future kernel upgrades should automatically rebuild the DKMS module, and update the initramfs.
 
-Reboot, and load the nonraid driver (`modprobe nonraid super=/unraid.dat`) and you should have the nonraid driver interface `/proc/nmdcmd` available.
+Reboot, and load the nonraid driver (`modprobe nonraid super=/nonraid.dat`) and you should have the nonraid driver interface `/proc/nmdcmd` available. You can then use the included `nmdctl` tool for array management, or interact with the driver directly.
 
 ## Array Management
-### General notes
+
+### Using nmdctl (NonRAID Management Tool)
+The project now includes a management tool called `nmdctl` that automates common NonRAID array operations, making it easier to manage the array without using the raw driver interface.
+
+#### Installation
+The nmdctl script is located in the `tools/` directory, and is not yet available as a deb package. To install it:
+
+```bash
+sudo cp tools/nmdctl /usr/local/bin/
+sudo chmod +x /usr/local/bin/nmdctl
+```
+
+#### Common operations
+
+**Display array status:**
+```bash
+sudo nmdctl status
+```
+
+**Create a new array (interactive):**
+
+This makes assumptions that the disks are already partitioned to have a single partition and their device name matches `/dev/sd*`. You can partition the disk with the command `sudo sgdisk -o -a 8 -n 1:32K:0 /dev/sdX` (this will create a new partition table on the disk, so be careful to use the correct disk).
+```bash
+sudo nmdctl create
+```
+Once the array is started, the nmd devices will be available as `/dev/nmdXp1`, where `X` is the slot number. They can then be formatted with your desired filesystem (XFS, BTRFS, ZFS, etc.) and mounted.
+
+**Start/stop the array:**
+
+Automatically imports all disks to the array.
+```bash
+sudo nmdctl start/stop
+```
+
+**Import all disks to the array without starting:**
+
+Useful if you want to add a new disk which needs to be done before starting the array.
+```bash
+sudo nmdctl import
+```
+
+**Add a new disk (interactive):**
+
+Same assumption about disk partitioning and device naming as with `create`, and the disk must not already be assigned to the array. Only one disk can be added at a time.
+```bash
+sudo nmdctl add
+```
+
+**Unassign a disk from a slot:**
+```bash
+sudo nmdctl unassign SLOT
+```
+
+**Start/stop a parity check:**
+
+This will also start reconstruction or clear operations depending on the array state.
+```bash
+sudo nmdctl check/nocheck
+```
+
+#### Using a custom superblock file location
+Commands will load the driver module automatically if it is not loaded already, and the tool defaults to using `/nonraid.dat` as the superblock file path. To use a different location:
+```bash
+sudo nmdctl -s /path/to/superblock.dat reload
+```
+
+For more details, run `sudo nmdctl --help`
+
+### Manual Management (Using Driver Interface)
 The driver provides no automation what so ever, and for example array member disks need to be imported manually every time the driver is loaded, in the correct slots and with correct parameters.
 
 It's important to understand that many things related to automatic detection etc mentioned in the UnRAID storage management docs: https://docs.unraid.net/unraid-os/manual/storage-management are handled by the commercial UnRAID system, and not by the array driver component.
 
-Scripts could be made to automate the array management operations, but as of now they do not exist.
+While the `nmdctl` tool now automates many tasks, understanding the underlying driver interface is still valuable for troubleshooting or advanced usage.
 
 ### Superblock file
 Array state is kept in a superblock file, that is stored outside the array and read by the driver when the driver module is loaded.
 
 > [!IMPORTANT]
-> Superblock filename must be given as kernel module parameter: `modprobe nonraid super=/unraid.dat`
+> Superblock filename must be given as kernel module parameter: `modprobe nonraid super=/nonraid.dat`
 
 Superblock file contains the array configuration, including which disk id is assigned to which slot, and what their state was at the time of last superblock update.
 
 If the superblock file is lost, the array can be recreated with the original import parameters (and you are even able to skip parity reconstruction if you are sure there has been no data changes), but superblock file is needed if you have had a disk failure and need to start the array with a missing disk.
 
 Guessing from the official docs, the "New Config" operation in the UnRAID system is probably basically reloading the driver with a new, empty superblock file, allowing you to start again in the NEW_ARRAY state and import the existing disks in whatever order and configuration you want.
- - Manually this is done by reloading the driver with a different superblock parameter: `modprobe -r nonraid && modprobe nonraid super=/new_unraid.dat` (or moving the old superblock file out of the way before reloading the driver)
+ - Manually this is done by reloading the driver with a different superblock parameter: `modprobe -r nonraid && modprobe nonraid super=/new_nonraid.dat` (or moving the old superblock file out of the way before reloading the driver)
  - By default NEW_ARRAY always marks parity disks invalid forcing parity reconstruction, so the "Parity is valid" UI option in "New config" basically does  `echo "set invalidslot 98" > /proc/nmdcmd` before starting the array, which causes the driver to not consider parity disks as invalid when creating an array, and thus skipping needing reconstruction.
    - It should go without saying, but this is a very error-prone operation when done completely manually without an UI double checking everything, so be careful!
 
 ### nmdcmd
-Array is managed via procfs `/proc/nmdcmd`, see [docs/nmdcmd.8](docs/nmdcmd.8) for "man page". The documentation is LLM generated from the driver source code, but seems to be mostly correct.
+The driver is managed via procfs interface `/proc/nmdcmd`, see [docs/nmdcmd.8](docs/nmdcmd.8) for "man page". The documentation is LLM generated from the driver source code, but seems to be mostly correct.
 
 > [!TIP]
 > You need to write commands to the `/proc/nmdcmd` file as root, so either do it from root shell or use `sudo sh -c 'echo "command" > /proc/nmdcmd'` (or `echo "command"|sudo tee /proc/nmdcmd`)
@@ -64,7 +132,8 @@ It is a text file that lists the status of each nmd device, including the disks 
 
 ### Creating a new array
 1. Import disks (parity is not required, but as a whole example here).
-The disks must be partitioned, and the size (in 1k blocks) parameter in the import must cover the whole partition. Check docs/nmdcmd.8 for details on the params.
+The disks must be partitioned (for example `sgdisk -o -a 8 -n 1:32K:0 /dev/sdX`), and the size needs to be the number of sectors divisible by 8, and then presented in 1k blocks. (Usually this means dividing the number of sectors by 2, as a sector is usually 512 bytes.)
+Check docs/nmdcmd.8 for details on the params.
 ```
 echo "import 0 sdd1 0 10000000 0 VBOX_HARDDISK_VBb584354a-302d68db" > /proc/nmdcmd
 echo "import 1 sdb1 0 10000000 0 VBOX_HARDDISK_VB4f18929e-8de91109" > /proc/nmdcmd
@@ -94,7 +163,7 @@ echo "check" > /proc/nmdcmd
 ### Starting existing array after boot
 1. Load the driver with the correct superblock file:
 ```
-modprobe nmd super=/unraid.dat
+modprobe nmd super=/nonraid.dat
 ```
 Once the driver is loaded, `/proc/nmdstat` can be used to check which drive ID should go to which slot. (This could be used to automate the imports.)
 
@@ -117,11 +186,12 @@ echo "import 2 sdc1 0 10000000 0 VBOX_HARDDISK_VB9c8a60bc-22209161" > /proc/nmdc
 
 ### Driver bugs / "features"
 As the driver is not intended to be used manually, normally the UnRAID UI makes sure it doesn't do things which cause driver issues, but manually these are easy to run into:
-* Unassigning same slot twice increases disk missing counter twice, causing the array to enter TOO_MANY_MISSING_DISKS state - this requires driver reload to reset: `modprobe -r nmd && modprobe nmd super=/unraid.dat`
+* Unassigning same slot twice increases disk missing counter twice, causing the array to enter TOO_MANY_MISSING_DISKS state - this requires driver reload to reset: `modprobe -r nmd && modprobe nmd super=/nonraid.dat` or `nmdctl reload`
 * Same goes for many other internal state counters - best practise seems to be to always reload the driver after a single array operation
 
 ## Caveats
 - This is just a forked open-source `md_unraid` driver for those who are interested in DIY - it simply handles the array and parity. You have to manually handle importing disks directly via the driver management interface, starting with the correct parameters, doing necessary reconstructions/checks, monitoring the array state from /proc/nmdstat etc.
+  - `nmdctl` tool can now be used to automate many of the basic array operations
 - You'll need to manually create filesystems on the nmd devices, and mount them, and add mergerfs yourself to combine them into a single mount point if that is desired
 - Driver is pretty finicky, and can easily crash the kernel if commands are given in wrong order or with wrong parameters - some custom patches are used to avoid most common crashes (like trying to start array without importing all disks)
 - It is easy to end up in an error state unassigning/reassigning disks, and trying to continue blindly often results in kernel panic - error states can usually be cleared by a driver reload and then trying imports again
@@ -133,7 +203,10 @@ As the driver is not intended to be used manually, normally the UnRAID UI makes 
 ## Plans
 - Look into adding support for more kernel versions, currently only 6.6 - 6.8 are supported, upstream has patches for 6.12 which should probably work from 6.11+
 - Look into setting up a PPA for the dkms package, making updates easier
-- Scripts to automate common array management tasks, like importing disks, starting arrays, etc.
+- ~~Scripts to automate common array management tasks, like importing disks, starting arrays, etc.~~
+  - Initial implementation with `nmdctl` is now available
+- Further `nmdctl` improvements, like detecting and mounting filesystems on nmd devices automatically
+- systemd service definition to handle array start/stop
 
 ## License
 This project is licensed under the GNU General Public License v2.0 (GPL-2.0) - the same license as the Linux kernel, and the `md_unraid` driver itself.

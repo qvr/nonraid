@@ -603,22 +603,31 @@ display_disk_entry() {
     printf "%$((21 - visible_length))s" " " # Use visible length for padding
 
     if [ "$mdstate" = "STARTED" ]; then
-        # Get filesystem type for data disks when array is started
-        if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
+        local mountpoint=""
+
+        # Get filesystem type and mountpoint for data disks when array is started
+        if [ -n "$diskname" ] && [ "$diskname" != "none" ]; then
             # For data disks, get the filesystem type
             if [[ "$idx" != "0" && "$idx" != "29" ]]; then
                 # Check if device exists before calling blkid
-                if [ -b "/dev/$rdevname" ]; then
-                    fs_type=$(get_fs_type "/dev/$rdevname")
+                if [ -b "/dev/$diskname" ]; then
+                    fs_type=$(get_fs_type "/dev/$diskname")
+                    # Get mountpoint if we have a filesystem
+                    if [ -n "$fs_type" ] && [ "$fs_type" != "unknown" ]; then
+                        mountpoint=$(get_mountpoint "$diskname" "$fs_type")
+                    else
+                        mountpoint="unmounted"
+                    fi
                 fi
             else
                 # For parity disks, use slot type (P or Q)
                 fs_type="${slottype:-}"
+                mountpoint="-"
             fi
         fi
 
-        # Include disk name and filesystem columns when array is started
-        printf "%-10s  %-8s  %-14s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-}" "$diskid"
+        # Include disk name, filesystem, and mountpoint columns when array is started
+        printf "%-10s  %-8s  %-14s  %-8s  %-16s  %s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-}" "${mountpoint:-unmounted}" "$diskid"
     else
         # Original format without disk name and filesystem
         printf "%-10s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
@@ -634,8 +643,8 @@ show_disk_status() {
     echo ""
 
     if [ "$mdstate" = "STARTED" ]; then
-        echo -e "Slot  Status               Device      Size(GB)  Disk Name       FS        Drive ID"
-        echo -e "----  -------------------  ----------  --------  -------------   --------  -------------------------------------"
+        echo -e "Slot  Status               Device      Size(GB)  Disk Name       FS        Mountpoint        Drive ID"
+        echo -e "----  -------------------  ----------  --------  -------------   --------  ---------------   -------------------------------------"
     else
         echo -e "Slot  Status               Device      Size(GB)  Drive ID"
         echo -e "----  -------------------  ----------  --------  -------------------------------------"
@@ -730,6 +739,66 @@ get_fs_type() {
 
     echo ""
     return 1
+}
+
+# Get mountpoint for a device
+get_mountpoint() {
+    local device="$1"
+    local fs_type="$2"
+
+    # Default to unmounted
+    local mountpoint="unmounted"
+
+    if [ -z "$device" ] || [ "$device" = "none" ]; then
+        echo "$mountpoint"
+        return 0
+    fi
+
+    # Handle different filesystem types
+    case "$fs_type" in
+        "xfs"|"ext4"|"ext3"|"ext2"|"btrfs")
+            # These filesystems can be found directly in /proc/mounts
+            local found_mountpoint=$(grep -w "/dev/$device" /proc/mounts | awk '{print $2}' | head -1)
+            if [ -n "$found_mountpoint" ]; then
+                mountpoint="$found_mountpoint"
+            fi
+            ;;
+
+        "zfs")
+            # For ZFS, we need to identify the pool name and dataset
+            # Get ZFS pool name that contains this device
+            if command -v zpool >/dev/null 2>&1; then
+                local pool=$(zpool list -H -o name,health | awk '{print $1}' | while read pool; do
+                    if zpool status "$pool" 2>/dev/null | grep -q "$device"; then
+                        echo "$pool"
+                        break
+                    fi
+                done)
+
+                if [ -n "$pool" ]; then
+                    # Check if the pool is mounted
+                    local zfs_mounts=$(zfs list -H -o name,mountpoint | grep -v "none$")
+                    # Start with the pool itself
+                    local found_mountpoint=$(echo "$zfs_mounts" | grep "^$pool[[:blank:]]" | awk '{print $2}' | head -1)
+
+                    if [ -n "$found_mountpoint" ] && [ "$found_mountpoint" != "none" ]; then
+                        mountpoint="$found_mountpoint"
+                    fi
+                fi
+            fi
+            ;;
+
+        *)
+            # Generic approach for other filesystem types
+            local found_mountpoint=$(grep -w "/dev/$device" /proc/mounts 2>/dev/null | awk '{print $2}' | head -1)
+            if [ -n "$found_mountpoint" ]; then
+                mountpoint="$found_mountpoint"
+            fi
+            ;;
+    esac
+
+    echo "$mountpoint"
+    return 0
 }
 
 # Get disk size in 1K blocks

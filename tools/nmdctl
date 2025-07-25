@@ -2071,6 +2071,14 @@ main() {
                 SUPERBLOCK_PATH="$2"
                 shift 2
                 ;;
+            "--no-color")
+                RED=""
+                GREEN=""
+                BLUE=""
+                YELLOW=""
+                NC=""
+                shift
+                ;;
             "-h"|"--help"|"help")
                 usage
                 ;;

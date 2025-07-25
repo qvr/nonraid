@@ -15,10 +15,10 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 ## Installation
 This has been tested on Ubuntu 24.04 LTS, but the DKMS driver should work on any kernel version between 6.6 - 6.8.
 
-For Ubuntu/Debian based systems, download the latest kernel module dkms package from releases, and install it and the prerequisites:
+For Ubuntu/Debian based systems, download the latest kernel module [dkms package from releases](https://github.com/qvr/nonraid/releases?q=nonraid+dkms), and install it and the prerequisites:
 ```
 sudo apt install dkms linux-headers-$(uname -r) build-essential
-sudo dpkg -i nonraid-dkms_*.deb
+sudo apt install ./nonraid-dkms_*.deb
 sudo update-initramfs -u -k all
 ```
 > [!NOTE]
@@ -32,11 +32,10 @@ Reboot, and load the nonraid driver (`modprobe nonraid super=/nonraid.dat`) and 
 The project now includes a management tool called `nmdctl` that automates common NonRAID array operations, making it easier to manage the array without using the raw driver interface.
 
 #### Installation
-The nmdctl script is located in the `tools/` directory, and is not yet available as a deb package. To install it:
+The nmdctl script is located in the `tools/` directory. It's also available as a deb package, download [the latest version from releases](https://github.com/qvr/nonraid/releases?q=nonraid+tools) and install it:
 
 ```bash
-sudo cp tools/nmdctl /usr/local/bin/
-sudo chmod +x /usr/local/bin/nmdctl
+sudo apt install ./nonraid-tools_*.deb
 ```
 
 #### Common operations

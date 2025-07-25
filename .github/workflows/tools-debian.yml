@@ -1,0 +1,69 @@
+name: Build nonraid-tools Debian Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Create as prerelease'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build-artifact:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Next Version Number
+        id: get-version
+        run: |
+          # Get count of existing nonraid-tools tags and increment by 1
+          NEXT_VERSION=$(git tag -l "nonraid-tools-*" | wc -l)
+          NEXT_VERSION=$((NEXT_VERSION + 1))
+          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Debian Package
+        run: |
+          cd tools
+          apt-get update -qq && apt-get install -y debhelper build-essential
+          dpkg-buildpackage -b -rfakeroot -us -uc
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          prerelease: ${{ github.event.inputs.prerelease }}
+          tag_name: nonraid-tools-${{ steps.get-version.outputs.version }}
+          name: NonRAID Tools Debian Package - Build ${{ steps.get-version.outputs.version }}
+          body: |
+            **NonRAID Tools Package - Build ${{ steps.get-version.outputs.version }}**
+
+            This release contains the NonRAID array management tools package for Ubuntu/Debian systems.
+
+            ## What's Included
+            - `/usr/bin/nmdctl`
+
+            ## Installation
+            ```bash
+            sudo apt install ./nonraid-tools_*.deb
+            ```
+
+            ## Usage
+            After installation, `nmdctl` command is available:
+            ```bash
+            sudo nmdctl --help
+            ```
+
+            ## Important Notes
+            - ⚠️ **Experimental software** - Use at your own risk
+            - See [README.md](https://github.com/${{ github.repository }}/blob/main/README.md) for more `nmdctl` command examples
+            - Always backup important data before use
+          files: |
+            ../*.deb

@@ -1,7 +1,13 @@
-name: Build Debian Package
+name: Build nonraid-dkms Debian Package
 
 on:
   workflow_dispatch:
+    inputs:
+      prerelease:
+        description: 'Create as prerelease'
+        required: false
+        default: true
+        type: boolean
 
 env:
   DEB_BUILD_OPTIONS: nocheck
@@ -14,6 +20,16 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Next Version Number
+        id: get-version
+        run: |
+          # Get count of existing nonraid-dkms tags and increment by 1
+          NEXT_VERSION=$(git tag -l "nonraid-dkms-*" | wc -l)
+          NEXT_VERSION=$((NEXT_VERSION + 1))
+          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
 
       - name: Install Debian Package Building Dependencies
         run: sudo bash debian/install_pkg_build_deps.sh
@@ -26,10 +42,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: nonraid-dkms-${{ github.run_number }}
-          name: NonRAID DKMS Debian Package - Build ${{ github.run_number }}
+          prerelease: ${{ github.event.inputs.prerelease }}
+          tag_name: nonraid-dkms-${{ steps.get-version.outputs.version }}
+          name: NonRAID DKMS Debian Package - Build ${{ steps.get-version.outputs.version }}
           body: |
-            **NonRAID DKMS Package - Build ${{ github.run_number }}**
+            **NonRAID DKMS Package - Build ${{ steps.get-version.outputs.version }}**
 
             This release contains the NonRAID kernel driver DKMS package for Ubuntu/Debian systems.
 

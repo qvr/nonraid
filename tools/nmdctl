@@ -22,6 +22,13 @@ NC='\033[0m' # No Color
 DEFAULT_SUPERBLOCK="/nonraid.dat"
 SUPERBLOCK_PATH=""
 
+# LUKS keyfile path
+LUKS_KEYFILE="/etc/nonraid/luks-keyfile"
+
+# verbose & unattended
+VERBOSE=0
+UNATTENDED=0
+
 # Global associative array for nmdstat values
 declare -A NMDSTAT_VALUES
 
@@ -619,6 +626,7 @@ display_disk_entry() {
         local usage="-"
         local fs_type=""
 
+        [ -n "$slottype" ] && mountpoint="-"
         # Get filesystem type and mountpoint for data disks when array is started
         if [ -n "$diskname" ] && [ "$diskname" != "none" ]; then
             # Check if device exists before calling blkid
@@ -638,7 +646,7 @@ display_disk_entry() {
         fi
 
         # Include disk name, filesystem, mountpoint and usage columns when array is started
-        printf "%-10s  %-8s  %-14s  %-8s  %-16s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "$usage" "$diskid"
+        printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "$usage" "$diskid"
     else
         # Original format without disk name and filesystem
         printf "%-10s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
@@ -654,8 +662,8 @@ show_disk_status() {
     echo ""
 
     if [ "$mdstate" = "STARTED" ]; then
-        echo -e "Slot  Status               Device      Size(GB)  Disk Name       FS        Mountpoint        Usage     Drive ID"
-        echo -e "----  -------------------  ----------  --------  -------------   --------  ---------------   --------  -------------------------------------"
+        echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage     Drive ID"
+        echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------  -------------------------------------"
     else
         echo -e "Slot  Status               Device      Size(GB)  Drive ID"
         echo -e "----  -------------------  ----------  --------  -------------------------------------"
@@ -742,6 +750,13 @@ get_fs_type() {
         # Convert zfs_member to just zfs
         if [ "$fs_type" = "zfs_member" ]; then
             echo "zfs"
+        elif [ "$fs_type" = "crypto_LUKS" ]; then
+            local luks_fs="$(get_fs_type "/dev/mapper/$(basename "$device")")"
+            if [ -z "$luks_fs" ]; then
+                echo "luks"
+            else
+                echo "luks+$luks_fs"
+            fi
         else
             echo "${fs_type:-unknown}"
         fi
@@ -753,6 +768,7 @@ get_fs_type() {
 }
 
 # Get mountpoint for a device
+# supports both relative and absolute device names
 get_mountpoint() {
     local device="$1"
     local fs_type="$2"
@@ -767,9 +783,18 @@ get_mountpoint() {
 
     # Handle different filesystem types
     case "$fs_type" in
+        luks\+*)
+            # For LUKS, we need to check the underlying filesystem
+            local luks_fs=$(echo "$fs_type" | cut -d'+' -f2)
+            if [ -n "$luks_fs" ]; then
+                mountpoint=$(get_mountpoint "/dev/mapper/$device" "$luks_fs")
+            fi
+            ;;
         "xfs"|"ext4"|"ext3"|"ext2"|"btrfs")
             # These filesystems can be found directly in /proc/mounts
-            local found_mountpoint=$(grep -w "/dev/$device" /proc/mounts | awk '{print $2}' | head -1)
+            local abs_device=$device
+            [[ "$device" != /dev/* ]] && abs_device="/dev/$device"
+            local found_mountpoint=$(grep -w "$abs_device" /proc/mounts | awk '{print $2}' | head -1)
             if [ -n "$found_mountpoint" ]; then
                 mountpoint="$found_mountpoint"
             fi
@@ -779,8 +804,9 @@ get_mountpoint() {
             # For ZFS, we need to identify the pool name and dataset
             # Get ZFS pool name that contains this device
             if command -v zpool >/dev/null 2>&1; then
+                local rel_device=$(basename "$device")
                 local pool=$(zpool list -H -o name,health | awk '{print $1}' | while read -r pool; do
-                    if zpool status "$pool" 2>/dev/null | grep -q "$device"; then
+                    if zpool status "$pool" 2>/dev/null | grep -q "$rel_device"; then
                         echo "$pool"
                         break
                     fi
@@ -801,7 +827,9 @@ get_mountpoint() {
 
         *)
             # Generic approach for other filesystem types
-            local found_mountpoint=$(grep -w "/dev/$device" /proc/mounts 2>/dev/null | awk '{print $2}' | head -1)
+            local abs_device="$device"
+            [[ "$device" != /dev/* ]] && abs_device="/dev/$device"
+            local found_mountpoint=$(grep -w "$abs_device" /proc/mounts 2>/dev/null | awk '{print $2}' | head -1)
             if [ -n "$found_mountpoint" ]; then
                 mountpoint="$found_mountpoint"
             fi
@@ -2122,6 +2150,30 @@ mount_array_disks() {
             continue
         fi
 
+        if [ "$fs_type" = "luks" ]; then
+            if [ -z "$LUKS_KEYFILE" ] || [ ! -f "$LUKS_KEYFILE" ]; then
+                echo -e "${RED}Error: LUKS device detected but keyfile does not exist. Cannot open LUKS device.${NC}"
+                error_count=$((error_count + 1))
+                continue
+            fi
+            # Open LUKS device
+            echo -n "Slot $slot (${diskname}): Opening LUKS device... "
+            if cryptsetup luksOpen --key-file "$LUKS_KEYFILE" "$device" "$diskname" >/dev/null 2>&1; then
+                echo -e "${GREEN}SUCCESS${NC}"
+                # redetect layered filesystem type after opening LUKS
+                fs_type="$(get_fs_type "$device")"
+            else
+                echo -e "${RED}FAILED${NC}"
+                error_count=$((error_count + 1))
+                continue
+            fi
+        fi
+        # Opened luks device, mount the filesystem
+        if [[ "$fs_type" =~ ^luks\+.* ]]; then
+            fs_type=$(echo "$fs_type" | cut -d'+' -f2)
+            device="/dev/mapper/$diskname"
+        fi
+
         # Handle mounting based on filesystem type
         case "$fs_type" in
             "zfs")
@@ -2228,57 +2280,75 @@ unmount_array_disks() {
             echo -e "Slot $slot (${YELLOW}${diskname}${NC}): ${YELLOW}No filesystem detected${NC}"
             skipped_count=$((skipped_count + 1))
             continue
-        elif [ "$current_mountpoint" = "unmounted" ]; then
+        elif [ "$current_mountpoint" = "unmounted" ] && [[ ! "$fs_type" =~ ^luks\+.* ]]; then
             echo -e "Slot $slot (${BLUE}${diskname}${NC}): Already unmounted"
             skipped_count=$((skipped_count + 1))
             continue
         fi
 
-        # Handle unmounting based on filesystem type
-        case "$fs_type" in
-            "zfs")
-                # For ZFS, we need to export the pool
-                # Get the pool name that contains this device
-                local pool_name=""
-                if command -v zpool >/dev/null 2>&1; then
-                    pool_name=$(zpool list -H -o name,health | awk '{print $1}' | while read -r pool; do
-                        if zpool status "$pool" 2>/dev/null | grep -q "$diskname"; then
-                            echo "$pool"
-                            break
-                        fi
-                    done)
-                fi
+        local luks_fs=0
+        if [[ "$fs_type" =~ ^luks\+.* ]]; then
+            fs_type=$(echo "$fs_type" | cut -d'+' -f2)
+            luks_fs=1
+        fi
 
-                if [ -n "$pool_name" ]; then
-                    echo -n "Slot $slot (${diskname}): Exporting ZFS pool $pool_name... "
-                    if zpool export "$pool_name" 2>/dev/null; then
+        if [ "$current_mountpoint" != "unmounted" ]; then
+            # Handle unmounting based on filesystem type
+            case "$fs_type" in
+                "zfs")
+                    # For ZFS, we need to export the pool
+                    # Get the pool name that contains this device
+                    local pool_name=""
+                    if command -v zpool >/dev/null 2>&1; then
+                        pool_name=$(zpool list -H -o name,health | awk '{print $1}' | while read -r pool; do
+                            if zpool status "$pool" 2>/dev/null | grep -q "$diskname"; then
+                                echo "$pool"
+                                break
+                            fi
+                        done)
+                    fi
+
+                    if [ -n "$pool_name" ]; then
+                        echo -n "Slot $slot (${diskname}): Exporting ZFS pool $pool_name... "
+                        if zpool export "$pool_name" 2>/dev/null; then
+                            echo -e "${GREEN}SUCCESS${NC}"
+                            unmounted_count=$((unmounted_count + 1))
+                        else
+                            echo -e "${RED}FAILED${NC}"
+                            error_count=$((error_count + 1))
+                        fi
+                    else
+                        echo -e "Slot $slot (${YELLOW}${diskname}${NC}): ${YELLOW}ZFS pool not found${NC}"
+                        skipped_count=$((skipped_count + 1))
+                    fi
+                    ;;
+
+                "xfs"|"ext4"|"ext3"|"ext2"|"btrfs"|*)
+                    echo -n "Slot $slot (${diskname}): Unmounting $fs_type from $current_mountpoint... "
+
+                    # Try unmounting with increasing force if needed
+                    if umount "$current_mountpoint" 2>/dev/null ||
+                    umount -f "$current_mountpoint" 2>/dev/null; then
                         echo -e "${GREEN}SUCCESS${NC}"
                         unmounted_count=$((unmounted_count + 1))
                     else
-                        echo -e "${RED}FAILED${NC}"
+                        echo -e "${RED}FAILED${NC} (Device may be busy)"
                         error_count=$((error_count + 1))
                     fi
-                else
-                    echo -e "Slot $slot (${YELLOW}${diskname}${NC}): ${YELLOW}ZFS pool not found${NC}"
-                    skipped_count=$((skipped_count + 1))
-                fi
-                ;;
+                    ;;
+            esac
+        fi
 
-            "xfs"|"ext4"|"ext3"|"ext2"|"btrfs"|*)
-                echo -n "Slot $slot (${diskname}): Unmounting from $current_mountpoint... "
-
-                # Try unmounting with increasing force if needed
-                if umount "$current_mountpoint" 2>/dev/null ||
-                   umount -f "$current_mountpoint" 2>/dev/null; then
-                    echo -e "${GREEN}SUCCESS${NC}"
-                    unmounted_count=$((unmounted_count + 1))
-                else
-                    echo -e "${RED}FAILED${NC} (Device may be busy)"
-                    echo -e "  You can check what's using it with: ${YELLOW}lsof $current_mountpoint${NC}"
-                    error_count=$((error_count + 1))
-                fi
-                ;;
-        esac
+        # If it was a luks filesystem, close it
+        if [ $luks_fs -eq 1 ]; then
+            echo -n "Slot $slot (${diskname}): Closing LUKS device... "
+            if cryptsetup luksClose "$diskname" 2>/dev/null; then
+                echo -e "${GREEN}SUCCESS${NC}"
+            else
+                echo -e "${RED}FAILED${NC}"
+                error_count=$((error_count + 1))
+            fi
+        fi
     done
 
     echo ""
@@ -2287,7 +2357,6 @@ unmount_array_disks() {
     echo -e "  ${BLUE}$skipped_count${NC} disks skipped (already unmounted or no filesystem)"
     if [ $error_count -gt 0 ]; then
         echo -e "  ${RED}$error_count${NC} disks failed to unmount"
-        echo -e "${YELLOW}Note: Use 'fuser -m <mountpoint>' to see which processes are using the disk${NC}"
         return 1
     fi
 
@@ -2311,6 +2380,22 @@ main() {
                 fi
                 SUPERBLOCK_PATH="$2"
                 shift 2
+                ;;
+            "-k"|"--keyfile")
+                if [ -z "$2" ] || [[ "$2" == -* ]]; then
+                    echo -e "${RED}Error: --keyfile requires a path argument${NC}"
+                    usage
+                fi
+                LUKS_KEYFILE="$2"
+                shift 2
+                ;;
+            "-v"|"--verbose")
+                VERBOSE=1
+                shift
+                ;;
+            "-u|--unattended")
+                UNATTENDED=1
+                shift
                 ;;
             "--no-color")
                 RED=""

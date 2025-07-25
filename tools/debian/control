@@ -1,0 +1,13 @@
+Source: nonraid-tools
+Section: extras
+Priority: optional
+Maintainer: Matti Hiljanen <matti@hiljanen.com>
+Build-Depends: debhelper (>=13.1~)
+Standards-Version: 4.6.2.1
+Homepage: https://github.com/qvr/nonraid
+
+Package: nonraid-tools
+Section: extras
+Architecture: all
+Depends: bash (>=5.0)
+Description: NonRAID array management tools Debian Package

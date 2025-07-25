@@ -604,30 +604,29 @@ display_disk_entry() {
 
     if [ "$mdstate" = "STARTED" ]; then
         local mountpoint=""
+        local usage="-"
+        local fs_type=""
 
         # Get filesystem type and mountpoint for data disks when array is started
         if [ -n "$diskname" ] && [ "$diskname" != "none" ]; then
-            # For data disks, get the filesystem type
-            if [[ "$idx" != "0" && "$idx" != "29" ]]; then
-                # Check if device exists before calling blkid
-                if [ -b "/dev/$diskname" ]; then
-                    fs_type=$(get_fs_type "/dev/$diskname")
-                    # Get mountpoint if we have a filesystem
-                    if [ -n "$fs_type" ] && [ "$fs_type" != "unknown" ]; then
-                        mountpoint=$(get_mountpoint "$diskname" "$fs_type")
-                    else
-                        mountpoint="unmounted"
+            # Check if device exists before calling blkid
+            if [ -b "/dev/$diskname" ]; then
+                fs_type=$(get_fs_type "/dev/$diskname")
+                # Get mountpoint if we have a filesystem
+                if [ -n "$fs_type" ] && [ "$fs_type" != "unknown" ]; then
+                    mountpoint=$(get_mountpoint "$diskname" "$fs_type")
+                    # Get usage percentage if mounted
+                    if [ "$mountpoint" != "unmounted" ] && [ "$mountpoint" != "-" ]; then
+                        usage=$(get_fs_usage "$mountpoint" "$fs_type")
                     fi
+                else
+                    mountpoint="unmounted"
                 fi
-            else
-                # For parity disks, use slot type (P or Q)
-                fs_type="${slottype:-}"
-                mountpoint="-"
             fi
         fi
 
-        # Include disk name, filesystem, and mountpoint columns when array is started
-        printf "%-10s  %-8s  %-14s  %-8s  %-16s  %s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-}" "${mountpoint:-unmounted}" "$diskid"
+        # Include disk name, filesystem, mountpoint and usage columns when array is started
+        printf "%-10s  %-8s  %-14s  %-8s  %-16s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "$usage" "$diskid"
     else
         # Original format without disk name and filesystem
         printf "%-10s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
@@ -643,8 +642,8 @@ show_disk_status() {
     echo ""
 
     if [ "$mdstate" = "STARTED" ]; then
-        echo -e "Slot  Status               Device      Size(GB)  Disk Name       FS        Mountpoint        Drive ID"
-        echo -e "----  -------------------  ----------  --------  -------------   --------  ---------------   -------------------------------------"
+        echo -e "Slot  Status               Device      Size(GB)  Disk Name       FS        Mountpoint        Usage     Drive ID"
+        echo -e "----  -------------------  ----------  --------  -------------   --------  ---------------   --------  -------------------------------------"
     else
         echo -e "Slot  Status               Device      Size(GB)  Drive ID"
         echo -e "----  -------------------  ----------  --------  -------------------------------------"
@@ -798,6 +797,51 @@ get_mountpoint() {
     esac
 
     echo "$mountpoint"
+    return 0
+}
+
+# Get filesystem usage percentage
+get_fs_usage() {
+    local mountpoint="$1"
+    local fs_type="$2"
+
+    # If not mounted or invalid mountpoint, return empty
+    if [ "$mountpoint" = "unmounted" ] || [ "$mountpoint" = "-" ] || [ ! -d "$mountpoint" ]; then
+        echo "-"
+        return 0
+    fi
+
+    # Handle different filesystem types
+    case "$fs_type" in
+        "zfs")
+            # For ZFS, we need to use zfs command to get usage
+            if command -v zfs >/dev/null 2>&1; then
+                # Extract pool/dataset name from the mountpoint
+                local dataset=$(zfs list -H -o name,mountpoint | grep "[[:space:]]$mountpoint$" | awk '{print $1}' | head -1)
+                if [ -n "$dataset" ]; then
+                    # Use zfs get to get the percentage directly
+                    local usage=$(zpool list -H -o cap "$dataset" 2>/dev/null)
+                    if [ -n "$usage" ]; then
+                        echo "$usage"
+                        return 0
+                    fi
+                fi
+            fi
+            ;;
+
+        *)
+            # Generic approach using df for standard filesystems
+            if command -v df >/dev/null 2>&1; then
+                local usage=$(df -h "$mountpoint" 2>/dev/null | tail -n 1 | awk '{ print $5 }')
+                if [ -n "$usage" ]; then
+                    echo "$usage"
+                    return 0
+                fi
+            fi
+            ;;
+    esac
+
+    echo "-"
     return 0
 }
 

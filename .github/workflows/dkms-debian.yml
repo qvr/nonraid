@@ -70,7 +70,7 @@ jobs:
 
             ## Important Notes
             - ⚠️ **Experimental software** - Use at your own risk
-            - Requires manual array management via `/proc/nmdcmd`
+            - You should also download & install the latest [nonraid-tools package](https://github.com/qvr/nonraid/releases?q=nonraid+tools) from separate release for array management `nmdctl` tool.
             - See [README.md](https://github.com/${{ github.repository }}/blob/main/README.md) for detailed usage instructions
             - Always backup important data before use
           files: |

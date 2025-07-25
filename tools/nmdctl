@@ -575,6 +575,8 @@ display_disk_entry() {
     local rdevname="$5"
     local rdevstatus="$6"
     local rdevnumerrors="${7:-0}"
+    local diskname="$8"
+    local mdstate="$9"
 
     # Convert size to GB
     local sizegb=0
@@ -598,16 +600,31 @@ display_disk_entry() {
     printf "%-4s  " "${slottype:-$idx}"
     printf "%s" "$status_formatted"
     printf "%$((21 - visible_length))s" " " # Use visible length for padding
-    printf "%-16s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
+
+    if [ "$mdstate" = "STARTED" ]; then
+        # Include disk name column when array is started
+        printf "%-10s  %-14s  %-8s  %s\n" "${rdevname:-none}" "${diskname:-${slottype:-$idx}}" "$sizegb" "$diskid"
+    else
+        # Original format without disk name
+        printf "%-10s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
+    fi
 }
 
 # Display all disks in the array
 show_disk_status() {
+    local mdstate="${NMDSTAT_VALUES[mdState]}"
+
     echo ""
     echo "=== Disk Status ==="
     echo ""
-    echo -e "Slot  Status               Device            Size(GB)  Drive ID"
-    echo -e "----  -------------------  ----------------  --------  -------------------------------------"
+
+    if [ "$mdstate" = "STARTED" ]; then
+        echo -e "Slot  Status               Device      Disk Name       Size(GB)  Drive ID"
+        echo -e "----  -------------------  ----------  -------------   --------  -------------------------------------"
+    else
+        echo -e "Slot  Status               Device      Size(GB)  Drive ID"
+        echo -e "----  -------------------  ----------  --------  -------------------------------------"
+    fi
 
     # Special handling for parity disks
     for idx in 0 29; do
@@ -619,6 +636,7 @@ show_disk_status() {
         if [ "$idx" -eq 0 ] || [ -n "$diskid" ] || [[ "$rdevstatus" == DISK_*_NEW ]]; then
             local disksize="${NMDSTAT_VALUES[diskSize.$idx]}"
             local rdevname="${NMDSTAT_VALUES[rdevName.$idx]}"
+            local rdevnumerrors="${NMDSTAT_VALUES[rdevNumErrors.$idx]}"
 
             # For DISK_NEW, get size from rdevSize instead of diskSize
             if [[ ("$rdevstatus" = "DISK_NEW" || "$rdevstatus" = "DISK_DSBL_NEW") ]] && [ -z "$disksize" -o "$disksize" = "0" ]; then
@@ -641,7 +659,7 @@ show_disk_status() {
             fi
 
             if [ -n "$rdevstatus" ]; then
-                display_disk_entry "$idx" "$slottype" "$disksize" "$diskid" "$rdevname" "$rdevstatus"
+                display_disk_entry "$idx" "$slottype" "$disksize" "$diskid" "$rdevname" "$rdevstatus" "$rdevnumerrors" "$diskname" "$mdstate"
             fi
         fi
     done
@@ -671,7 +689,7 @@ show_disk_status() {
                 fi
             fi
 
-            display_disk_entry "$idx" "" "$disksize" "$diskid" "$rdevname" "$rdevstatus" "$rdevnumerrors"
+            display_disk_entry "$idx" "" "$disksize" "$diskid" "$rdevname" "$rdevstatus" "$rdevnumerrors" "$diskname" "$mdstate"
         fi
     done
 

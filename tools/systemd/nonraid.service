@@ -1,0 +1,17 @@
+[Unit]
+Description=Start/Stop NonRAID array and manage mounts
+Requires=local-fs.target
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment="SUPER=/nonraid.dat"
+EnvironmentFile=-/etc/default/nonraid
+ExecStart=nmdctl -u -v -s $SUPER start
+ExecStart=nmdctl -u mount
+ExecStop=nmdctl -u unmount
+ExecStop=nmdctl -u stop
+
+[Install]
+WantedBy=multi-user.target

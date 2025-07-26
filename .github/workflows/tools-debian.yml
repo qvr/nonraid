@@ -28,10 +28,15 @@ jobs:
           NEXT_VERSION=$((NEXT_VERSION + 1))
           echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
 
+      - name: Install Debian Package Building Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y debhelper build-essential
+
       - name: Create Debian Package
         run: |
           cd tools
-          sudo apt-get update -qq && sudo apt-get install -y debhelper build-essential
+          cp systemd/nonraid.service debian/nonraid-tools.nonraid.service
           dpkg-buildpackage -b -rfakeroot -us -uc
 
       - name: Create Release

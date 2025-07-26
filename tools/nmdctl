@@ -47,7 +47,7 @@ usage() {
     echo "  add                         Add a new disk to the array interactively"
     echo "  unassign SLOT               Unassign a disk from the specified slot"
     echo "  reload                      Reload nonraid module with specified superblock"
-    echo "  check                       Start parity check"
+    echo "  check [OPTION]              Start parity check (CORRECT (default), NOCORRECT or RESUME)"
     echo "  nocheck [CANCEL|PAUSE]      Stop parity check (CANCEL or PAUSE)"
     echo "  mount [MOUNTPREFIX]         Mount all active data disks (default prefix: /mnt/disk)"
     echo "  unmount                     Unmount all active data disks"
@@ -55,7 +55,7 @@ usage() {
     echo "Global Options:"
     echo "  -s, --super PATH            Superblock file path to use when loading the module (default: $DEFAULT_SUPERBLOCK)"
     echo "  -k, --keyfile PATH          Path to LUKS keyfile to use during mounting (default: $LUKS_KEYFILE)"
-    echo "  -u, --unattended            Enable unattended mode"
+    echo "  -u, --unattended            Enable unattended mode, will import and start a healthy array without prompts"
     echo "  -v, --verbose               Enable verbose output"
     echo "  -h, --help                  Display this help message"
     echo ""
@@ -684,7 +684,7 @@ display_disk_entry() {
         # Include disk name, filesystem, mountpoint and usage columns when array is started
         if [ "$VERBOSE" -eq 1 ]; then
             # Show drive ID when verbose mode is enabled
-            printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "$usage" "$diskid"
+            printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s  %s\n" "${rdevname:-none}" "$disksize" "${diskname:-${slottype:-$idx}}" "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "$usage" "$diskid"
         else
             # Omit drive ID in normal mode
             printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "$usage"
@@ -693,7 +693,7 @@ display_disk_entry() {
         # Original format without disk name and filesystem
         if [ "$VERBOSE" -eq 1 ]; then
             # Show drive ID when verbose mode is enabled
-            printf "%-10s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
+            printf "%-10s  %-8s  %s\n" "${rdevname:-none}" "$disksize" "$diskid"
         else
             # Omit drive ID in normal mode
             printf "%-10s  %-8s\n" "${rdevname:-none}" "$sizegb"
@@ -711,7 +711,7 @@ show_disk_status() {
 
     if [ "$mdstate" = "STARTED" ]; then
         if [ "$VERBOSE" -eq 1 ]; then
-            echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage     Drive ID"
+            echo -e "Slot  Status               Device      Size(1k)  Disk Name   FS            Mountpoint        Usage     Drive ID"
             echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------  -------------------------------------"
         else
             echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage"
@@ -719,7 +719,7 @@ show_disk_status() {
         fi
     else
         if [ "$VERBOSE" -eq 1 ]; then
-            echo -e "Slot  Status               Device      Size(GB)  Drive ID"
+            echo -e "Slot  Status               Device      Size(1k)  Drive ID"
             echo -e "----  -------------------  ----------  --------  -------------------------------------"
         else
             echo -e "Slot  Status               Device      Size(GB)"
@@ -1238,6 +1238,11 @@ start_array() {
                 echo -e "${RED}Array is in ERROR state. Starting may fail or cause data loss.${NC}"
                 ;;
         esac
+
+        if [ "$UNATTENDED" -eq 1 ]; then
+            echo -e "${RED}Error: Cannot start array in abnormal state in unattended mode${NC}"
+            return 1
+        fi
 
         # Ask for confirmation
         read -r -p "Do you want to continue starting the array in this state? (y/N): " confirm
@@ -2216,7 +2221,7 @@ mount_array_disks() {
 
         if [ "$fs_type" = "luks" ]; then
             if [ -z "$LUKS_KEYFILE" ] || [ ! -f "$LUKS_KEYFILE" ]; then
-                echo -e "${RED}Error: LUKS device detected but keyfile does not exist. Cannot open LUKS device.${NC}"
+                echo -e "${RED}Error: LUKS device detected in slot $slot (${diskname}) but keyfile '${LUKS_KEYFILE}' does not exist. Cannot open LUKS device.${NC}"
                 error_count=$((error_count + 1))
                 continue
             fi
@@ -2263,7 +2268,7 @@ mount_array_disks() {
                     mkdir -p "$mountpoint"
                 fi
 
-                echo -n "Slot $slot (${diskname}): Mounting $fs_type to $mountpoint... "
+                echo -n "Slot $slot (${diskname}): Mounting ${fs_type^^} to $mountpoint... "
 
                 if mount "$device" "$mountpoint" 2>/dev/null; then
                     echo -e "${GREEN}SUCCESS${NC}"
@@ -2302,7 +2307,7 @@ unmount_array_disks() {
 
     local mdstate="${NMDSTAT_VALUES[mdState]}"
     if [ "$mdstate" != "STARTED" ]; then
-        echo -e "${RED}Error: Array must be started to unmount disks properly${NC}"
+        echo -e "${RED}Error: Array must be started to unmount disks${NC}"
         echo -e "Current array state: $mdstate"
         return 1
     fi
@@ -2388,7 +2393,7 @@ unmount_array_disks() {
                     ;;
 
                 "xfs"|"ext4"|"ext3"|"ext2"|"btrfs"|*)
-                    echo -n "Slot $slot (${diskname}): Unmounting $fs_type from $current_mountpoint... "
+                    echo -n "Slot $slot (${diskname}): Unmounting ${fs_type^^} from $current_mountpoint... "
 
                     # Try unmounting with increasing force if needed
                     if umount "$current_mountpoint" 2>/dev/null ||
@@ -2457,7 +2462,7 @@ main() {
                 VERBOSE=1
                 shift
                 ;;
-            "-u|--unattended")
+            "-u"|"--unattended")
                 UNATTENDED=1
                 shift
                 ;;
@@ -2522,7 +2527,7 @@ main() {
         "mount")
             mount_array_disks "$1"
             ;;
-        "unmount")
+        "unmount"|"umount")
             unmount_array_disks
             ;;
         *)

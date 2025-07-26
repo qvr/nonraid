@@ -1,5 +1,7 @@
 # NonRAID - unRAID storage array compatible kernel driver
 
+![nmdctl status screenshot](images/status_screenshot.png?raw=true "NonRAID nmdctl")
+
 NonRAID is a fork of the unRAID system's open-source `md_unraid` kernel driver for supported kernels, but targeting primarily Ubuntu 24.04 LTS, enabling UnRAID-style storage arrays with parity protection outside of the commercial UnRAID system.
 
 Unlike in UnRAID, where the driver replaces the kernel's standard `md` driver, the NonRAID driver has been separated into it's own kernel module (`md_nonraid`). This allows it to be easily added as a DKMS module on Ubuntu and Debian based systems, without needing to patch the kernel or replace the standard `md` driver. We do however replace the standard `raid6_pq` module with our patched version, as the upstream driver depends on those patches for the parity calculations.
@@ -41,9 +43,12 @@ sudo apt install ./nonraid-tools_*.deb
 #### Common operations
 
 **Display array status:**
+
+Displays the status of the array and individual disks. Displays detected filesystems, mountpoints and filesystem usage. Drive ID's are also displayed if global `--verbose` option is set.
 ```bash
 sudo nmdctl status
 ```
+Exits with an error code if there are any issues with the array, so this can be used as a simple monitoring in a cronjob. (Global `--no-color` option disables `nmdctl` colored ouput, making it more suitable for cron emails.)
 
 **Create a new array (interactive):**
 
@@ -59,6 +64,8 @@ Automatically imports all disks to the array.
 ```bash
 sudo nmdctl start/stop
 ```
+> [!NOTE]
+> If you are trying to start/import an existing UnRAID array, and you get an warning about size mismatch between detected and configured partition size, do not continue the import, but open an issue with details.
 
 **Import all disks to the array without starting:**
 
@@ -79,12 +86,34 @@ sudo nmdctl add
 sudo nmdctl unassign SLOT
 ```
 
+**Mount all data disks:**
+
+Mounts all detected unmounted filesystems under `MOUNTPREFIX` (default `/mnt/diskN`). ZFS pools are imported with their configured mountpoint. LUKS devices are opened with a key-file (global `--keyfile` option, default `/etc/nonraid/luks-keyfile`). Array needs to be started.
+```bash
+sudo nmdctl mount [MOUNTPREFIX]
+```
+
+**Unmount all data disks:**
+
+Unmounts all detected mounted filesystems. LUKS devices are closed after filesystem unmount.
+```bash
+sudo nmdctl unmount
+```
+
 **Start/stop a parity check:**
 
 This will also start reconstruction or clear operations depending on the array state.
 ```bash
 sudo nmdctl check/nocheck
 ```
+
+**Reload the nonraid module:**
+
+Reloads the driver module with the specified superblock path. This is can be used to recover from error states or when changing superblock files.
+```bash
+sudo nmdctl reload
+```
+This command effectively does `modprobe -r nonraid && modprobe nonraid super=/nonraid.dat` and is sometimes necessary to reset the driver's internal state after operations like unassigning disks or initial array creation.
 
 #### Using a custom superblock file location
 Commands will load the driver module automatically if it is not loaded already, and the tool defaults to using `/nonraid.dat` as the superblock file path. To use a different location:
@@ -201,10 +230,11 @@ As the driver is not intended to be used manually, normally the UnRAID UI makes 
 
 ## Plans
 - Look into adding support for more kernel versions, currently only 6.6 - 6.8 are supported, upstream has patches for 6.12 which should probably work from 6.11+
-- Look into setting up a PPA for the dkms package, making updates easier
+- Look into setting up a PPA for the dkms and tools packages, making updates easier
 - ~~Scripts to automate common array management tasks, like importing disks, starting arrays, etc.~~
   - Initial implementation with `nmdctl` is now available
-- Further `nmdctl` improvements, like detecting and mounting filesystems on nmd devices automatically
+- ~~Further `nmdctl` improvements, like detecting and mounting filesystems on nmd devices automatically~~
+  - `nmdctl` now supports detecting and mounting filesystems, even from inside LUKS devices
 - systemd service definition to handle array start/stop
 
 ## License

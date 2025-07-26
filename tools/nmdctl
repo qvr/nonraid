@@ -2250,7 +2250,7 @@ mount_array_disks() {
                 local pool_name="disk${slot}"
                 echo -n "Slot $slot (${diskname}): Importing ZFS pool $pool_name... "
 
-                if zpool import -d "$device" "$pool_name" 2>/dev/null; then
+                if zpool import -o cachefile=none -d "$device" "$pool_name" 2>/dev/null; then
                     echo -e "${GREEN}SUCCESS${NC}"
                     mounted_count=$((mounted_count + 1))
                 else

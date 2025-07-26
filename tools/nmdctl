@@ -1209,6 +1209,16 @@ start_array() {
         return 1
     fi
 
+    # If no disks were imported, warn the user, and refuse to start in unattended mode
+    if [ "$imported_disks" -eq 0 ]; then
+        if [ "$UNATTENDED" -eq 1 ]; then
+            echo -e "${RED}Error: No disks imported. Cannot start array (unattended mode)${NC}"
+            return 1
+        else
+            echo -e "${YELLOW}Warning: No disks imported.${NC}"
+        fi
+    fi
+
     # Check array state and proceed based on it
     if [ "$mdstate" = "STOPPED" ]; then
         # Normal state, proceed without confirmation

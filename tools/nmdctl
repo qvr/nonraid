@@ -54,6 +54,9 @@ usage() {
     echo ""
     echo "Global Options:"
     echo "  -s, --super PATH            Superblock file path to use when loading the module (default: $DEFAULT_SUPERBLOCK)"
+    echo "  -k, --keyfile PATH          Path to LUKS keyfile to use during mounting (default: $LUKS_KEYFILE)"
+    echo "  -u, --unattended            Enable unattended mode"
+    echo "  -v, --verbose               Enable verbose output"
     echo "  -h, --help                  Display this help message"
     echo ""
     exit 1
@@ -646,10 +649,22 @@ display_disk_entry() {
         fi
 
         # Include disk name, filesystem, mountpoint and usage columns when array is started
-        printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "$usage" "$diskid"
+        if [ "$VERBOSE" -eq 1 ]; then
+            # Show drive ID when verbose mode is enabled
+            printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "$usage" "$diskid"
+        else
+            # Omit drive ID in normal mode
+            printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s\n" "${rdevname:-none}" "$sizegb" "${diskname:-${slottype:-$idx}}" "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "$usage"
+        fi
     else
         # Original format without disk name and filesystem
-        printf "%-10s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
+        if [ "$VERBOSE" -eq 1 ]; then
+            # Show drive ID when verbose mode is enabled
+            printf "%-10s  %-8s  %s\n" "${rdevname:-none}" "$sizegb" "$diskid"
+        else
+            # Omit drive ID in normal mode
+            printf "%-10s  %-8s\n" "${rdevname:-none}" "$sizegb"
+        fi
     fi
 }
 
@@ -662,11 +677,21 @@ show_disk_status() {
     echo ""
 
     if [ "$mdstate" = "STARTED" ]; then
-        echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage     Drive ID"
-        echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------  -------------------------------------"
+        if [ "$VERBOSE" -eq 1 ]; then
+            echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage     Drive ID"
+            echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------  -------------------------------------"
+        else
+            echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage"
+            echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------"
+        fi
     else
-        echo -e "Slot  Status               Device      Size(GB)  Drive ID"
-        echo -e "----  -------------------  ----------  --------  -------------------------------------"
+        if [ "$VERBOSE" -eq 1 ]; then
+            echo -e "Slot  Status               Device      Size(GB)  Drive ID"
+            echo -e "----  -------------------  ----------  --------  -------------------------------------"
+        else
+            echo -e "Slot  Status               Device      Size(GB)"
+            echo -e "----  -------------------  ----------  --------"
+        fi
     fi
 
     # Special handling for parity disks
@@ -1017,6 +1042,12 @@ import_disks() {
                         echo -e "${YELLOW}Warning: Size mismatch for disk in slot $slot${NC}"
                         echo -e "  Partition size: $disk_size KB"
                         echo -e "  Expected size : $configured_size KB"
+
+                        if [ "$UNATTENDED" -eq 1 ]; then
+                            # If unattended, do not continue import
+                            echo -e "${RED}Error: Size mismatch for disk in slot $slot (unattended mode)${NC}"
+                            continue
+                        fi
 
                         # Ask for confirmation
                         read -r -p "Use the configured size instead of detected size? (y/N): " confirm

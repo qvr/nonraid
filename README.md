@@ -57,6 +57,12 @@ This makes assumptions that the disks are already partitioned to have a single p
 sudo nmdctl create
 ```
 Once the array is started, the nmd devices will be available as `/dev/nmdXp1`, where `X` is the slot number. They can then be formatted with your desired filesystem (XFS, BTRFS, ZFS, etc.) and mounted.
+> [!IMPORTANT]
+> If you are using ZFS, make sure there is no service (like `zfs-import-cache.service`) which can automatically import the ZFS pool(s) from raw `/dev/sdX` devices on boot, as this will cause the NonRAID parity to **silently** become invalid requiring a corrective parity check (`nmdctl check`).
+>
+> This of course also applies to any other filesystem too, they should never be directly mounted from the raw `/dev/sdX` devices.
+>
+> One way to avoid this is to use LUKS encryption on the NonRAID disks, which prevents OS services from detecting the filesystems on raw devices at all.
 
 **Start/stop the array:**
 

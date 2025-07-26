@@ -285,14 +285,17 @@ get_defined_slots() {
 # Format time duration in seconds to a human-readable format (HH:MM:SS)
 format_time_duration() {
     local seconds=$1
-    local hours=$(( seconds / 3600 ))
+    local days=$(( seconds / 86400 ))
+    local hours=$(( (seconds % 86400) / 3600 ))
     local minutes=$(( (seconds % 3600) / 60 ))
     local secs=$(( seconds % 60 ))
 
-    if [ "$hours" -gt 0 ]; then
-        printf "%d:%02d:%02d" "$hours" "$minutes" "$secs"
+    if [ "$days" -gt 0 ]; then
+        printf "%d days, %d hours" "$days" "$hours"
+    elif [ "$hours" -gt 0 ]; then
+        printf "%d hours, %02d minutes" "$hours" "$minutes"
     elif [ "$minutes" -gt 0 ]; then
-        printf "%d:%02d" "$minutes" "$secs"
+        printf "%d minutes, %02d seconds" "$minutes" "$secs"
     else
         printf "%d sec" "$secs"
     fi
@@ -330,6 +333,11 @@ determine_array_health() {
     local mdnumreplaced="${NMDSTAT_VALUES[mdNumReplaced]}"
     local mdnumnew="${NMDSTAT_VALUES[mdNumNew]}"
 
+    local sbsynced="${NMDSTAT_VALUES[sbSynced]}"
+    local sbsynced2="${NMDSTAT_VALUES[sbSynced2]}"
+    local sbsyncerrs="${NMDSTAT_VALUES[sbSyncErrs]}"
+    local sbsyncexit="${NMDSTAT_VALUES[sbSyncExit]}"
+
     local health_status=""
     local health_details=""
 
@@ -347,6 +355,21 @@ determine_array_health() {
         fi
         disks_num_errors=$((disks_num_errors + "${NMDSTAT_VALUES[rdevNumErrors.$slot]}"))
     done
+
+    local last_sync="never"
+    # When did the last sync operation end
+    if [ "$sbsynced2" != "0" ]; then
+        last_sync_ago=$(($(printf "%(%s)T")-sbsynced2))
+        last_sync="$(format_time_duration "$last_sync_ago") ago"
+        if [ "$last_sync_ago" -gt 2592000 ]; then
+            last_sync="${YELLOW}$last_sync${NC} (more than 30 days)"
+        fi
+        if [ "$sbsyncexit" -gt 0 ]; then
+            last_sync="$last_sync ${RED}(errors encountered)${NC}"
+        fi
+    elif [ "$sbsynced" != "0" ]; then
+        last_sync="in progress"
+    fi
 
     local return_code=1
     # Check for critical error conditions first
@@ -372,7 +395,8 @@ determine_array_health() {
     # Check for standard degraded conditions
     elif [ "$mdnummissing" -gt 0 ] || [ "$mdnuminvalid" -gt 0 ] ||
          [ "$mdnumwrong" -gt 0 ] || [ "$mdnumdisabled" -gt 0 ] ||
-         [ "$mdnumreplaced" -gt 0 ]; then
+         [ "$mdnumreplaced" -gt 0 ] || [ "$sbsyncerrs" -gt 0 ] ||
+         [ "$sbsyncexit" -gt 0 ]; then
         health_status="${YELLOW}DEGRADED${NC}"
 
         local issues=""
@@ -381,6 +405,7 @@ determine_array_health() {
         [ "$mdnumwrong" -gt 0 ] && issues="${issues}Wrong: $mdnumwrong, "
         [ "$mdnumdisabled" -gt 0 ] && issues="${issues}Disabled: $mdnumdisabled, "
         [ "$mdnumreplaced" -gt 0 ] && issues="${issues}Replaced: $mdnumreplaced, "
+        [ "$sbsyncerrs" -gt 0 ] && issues="${issues}Sync Errors: $sbsyncerrs, "
         # Remove trailing comma and space
         health_details=${issues%, }
     # Check if array is stopped but healthy
@@ -404,6 +429,7 @@ determine_array_health() {
     else
         echo ""
     fi
+    echo -e "Array Checked : $last_sync"
 
     return $return_code
 }
@@ -502,6 +528,7 @@ show_array_size_and_parity() {
 show_resync_status() {
     local mdresync="${NMDSTAT_VALUES[mdResync]}"
     local mdresyncaction="${NMDSTAT_VALUES[mdResyncAction]}"
+    local mdresynccorr="${NMDSTAT_VALUES[mdResyncCorr]}"
 
     # Check for pending disk clearing
     if [ "$mdresync" = "0" ] && [ "$mdresyncaction" = "clear" ]; then
@@ -519,6 +546,12 @@ show_resync_status() {
         local mdresyncsize="${NMDSTAT_VALUES[mdResyncSize]}"
         local mdresyncdt="${NMDSTAT_VALUES[mdResyncDt]}"
         local mdresyncdb="${NMDSTAT_VALUES[mdResyncDb]}"
+
+        local corr="(correcting)"
+        # Check or correction operation
+        if [ "$mdresynccorr" = "0" ]; then
+            corr="(check only)"
+        fi
 
         # Calculate progress percentage
         local progress=0
@@ -551,7 +584,7 @@ show_resync_status() {
         local eta_formatted=$(format_time_duration $eta_seconds)
 
         echo ""
-        echo -e "Operation     : ${BLUE}$mdresyncaction${NC}"
+        echo -e "Operation     : ${BLUE}$mdresyncaction${NC} $corr"
         echo -e "Progress      : $progress% ($mdresyncpos/$mdresyncsize blocks)"
         echo -e "Speed         : $rate_mb MB/s"
         echo -e "Elapsed Time  : $elapsed_formatted"

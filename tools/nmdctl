@@ -1454,9 +1454,8 @@ create_array() {
     local array_label=""
     read -r -p "Enter a label for the array (optional): " array_label
     if [ -n "$array_label" ]; then
-        # Set array label if provided
-        echo "Setting array label: $array_label"
-        run_nmd_command "label $array_label"
+        # Defer setting the label until disks have been added to array
+        echo "Will set array label to: $array_label"
     fi
     echo ""
 
@@ -1567,6 +1566,11 @@ create_array() {
     fi
 
     echo -e "${GREEN}Successfully assigned $assigned_count disk(s) to the array${NC}"
+
+    # Now set the array label if provided
+    if [ -n "$array_label" ]; then
+        run_nmd_command "label $array_label"
+    fi
 
     # Show array status
     echo ""

@@ -39,6 +39,7 @@ The nmdctl script is located in the `tools/` directory. It's also available as a
 ```bash
 sudo apt install ./nonraid-tools_*.deb
 ```
+The deb package will also install a [systemd service file](tools/systemd/nonraid.service) that handles starting the NonRAID array on boot and mounting all data disks.
 
 #### Common operations
 
@@ -58,7 +59,7 @@ sudo nmdctl create
 ```
 Once the array is started, the nmd devices will be available as `/dev/nmdXp1`, where `X` is the slot number. They can then be formatted with your desired filesystem (XFS, BTRFS, ZFS, etc.) and mounted.
 > [!IMPORTANT]
-> If you are using ZFS, make sure there is no service (like `zfs-import-cache.service`) which can automatically import the ZFS pool(s) from raw `/dev/sdX` devices on boot, as this will cause the NonRAID parity to **silently** become invalid requiring a corrective parity check (`nmdctl check`).
+> If you are using ZFS, make sure there is no service (like `zfs-import-cache.service`) which can automatically import the ZFS pool(s) from raw `/dev/sdX` devices on boot, as this will cause the NonRAID parity to **silently** become invalid requiring a corrective parity check (`nmdctl check`). `nmdctl mount` imports ZFS pools with the option `cachefile=none` to avoid this particular `zfs-import-cache` issue.
 >
 > This of course also applies to any other filesystem too, they should never be directly mounted from the raw `/dev/sdX` devices.
 >
@@ -94,7 +95,7 @@ sudo nmdctl unassign SLOT
 
 **Mount all data disks:**
 
-Mounts all detected unmounted filesystems under `MOUNTPREFIX` (default `/mnt/diskN`). ZFS pools are imported with their configured mountpoint. LUKS devices are opened with a key-file (global `--keyfile` option, default `/etc/nonraid/luks-keyfile`). Array needs to be started.
+Mounts all detected unmounted filesystems to `MOUNTPREFIX` (default `/mnt/diskN`). ZFS pools are imported with their configured mountpoint. LUKS devices are opened with a key-file (global `--keyfile` option, default `/etc/nonraid/luks-keyfile`). Array needs to be started.
 ```bash
 sudo nmdctl mount [MOUNTPREFIX]
 ```
@@ -241,7 +242,7 @@ As the driver is not intended to be used manually, normally the UnRAID UI makes 
   - Initial implementation with `nmdctl` is now available
 - ~~Further `nmdctl` improvements, like detecting and mounting filesystems on nmd devices automatically~~
   - `nmdctl` now supports detecting and mounting filesystems, even from inside LUKS devices
-- systemd service definition to handle array start/stop
+- ~~systemd service definition to handle array start/stop~~
 
 ## License
 This project is licensed under the GNU General Public License v2.0 (GPL-2.0) - the same license as the Linux kernel, and the `md_unraid` driver itself.

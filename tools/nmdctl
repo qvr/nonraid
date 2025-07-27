@@ -950,7 +950,7 @@ get_disk_size_kb() {
         return 1
     fi
 
-    # Use blockdev to get exact size in 512-byte sectors
+    # Use blockdev to get exact size in 512-byte logical sectors
     local sectors=$(blockdev --getsz "$device" 2>/dev/null)
     if [ -n "$sectors" ]; then
         # Round down to nearest multiple of 8 sectors (driver reads/writes 8 sectors at a time)
@@ -1404,6 +1404,8 @@ create_array() {
     # Get current superblock path
     local superblock="${SUPERBLOCK_PATH:-$DEFAULT_SUPERBLOCK}"
     local is_new_superblock=0
+    local do_new_config=0
+    local do_parity_skip=0
 
     # Check if this will be a new superblock
     if [ ! -f "$superblock" ]; then
@@ -1422,13 +1424,38 @@ create_array() {
         return 1
     fi
 
+    # Check if the array is already started
+    local mdstate=$(get_nmdstat_value "mdState")
+    if [ "$mdstate" != "STOPPED" ]; then
+        echo -e "${RED}Error: The array is not currently stopped. Please stop it first.${NC}"
+        return 1
+    fi
+
     # Verify no disks are defined in the array
     local disk_count=$(get_defined_slots_count)
     if [ "$disk_count" -gt 0 ] && [ "$is_new_superblock" -eq 0 ]; then
-        echo -e "${RED}Error: The array already has $disk_count disk(s) defined${NC}"
-        echo -e "${YELLOW}To create a new array, unload and reload the module with a new or empty superblock${NC}"
-        echo -e "Use: ${GREEN}nmdctl --super /path/to/new/superblock.dat reload${NC}"
-        return 1
+        echo -e "${YELLOW}Warning: The array already has $disk_count disk(s) configured${NC}"
+        echo ""
+        read -r -p "Do you want to recreate the current array with a new config? [y/N]: " response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            get_all_nmdstat_values NMDSTAT_VALUES
+            do_new_config=1
+            echo -e "Saving old superblock as ${GREEN}${superblock}.bak${NC}"
+            if ! mv "$superblock" "${superblock}.bak" 2>/dev/null; then
+                echo -e "${RED}Error: Failed to move old superblock${NC}"
+                return 1
+            fi
+            echo -e "${YELLOW}Reloading module with empty superblock...${NC}"
+            if ! reload_module 1; then
+                echo -e "${RED}Error: Failed to reload module with empty superblock - restoring old superblock and aborting${NC}"
+                mv "${superblock}.bak" "$superblock" 2>/dev/null
+                return 1
+            fi
+            echo -e "${GREEN}Module reloaded successfully${NC}"
+        else
+            echo "Operation cancelled."
+            return 1
+        fi
     fi
 
     echo -e "=== ${BLUE}Creating New NonRAID Array${NC} ==="
@@ -1482,6 +1509,35 @@ create_array() {
             echo -e "ID: Unknown"
         fi
         echo ""
+        if [ "$do_new_config" -eq 1 ]; then
+            # Check if this disk was previously assigned to the array
+            local prev_slot=""
+            local prev_slot_type=""
+            if [ -n "$disk_id" ]; then
+                # Search through all previously configured slots to find where this disk was assigned
+                for check_slot in $(get_defined_slots); do
+                    local check_disk_id="${NMDSTAT_VALUES[diskId.$check_slot]}"
+                    if [ -n "$check_disk_id" ] && [[ "$disk_id" == *"$check_disk_id"* ]] || [[ "$check_disk_id" == *"$disk_id"* ]]; then
+                        prev_slot="$check_slot"
+                        if [ "$check_slot" = "0" ]; then
+                            prev_slot_type="P (Parity)"
+                        elif [ "$check_slot" = "29" ]; then
+                            prev_slot_type="Q (Second Parity)"
+                        else
+                            prev_slot_type="Data"
+                        fi
+                        break
+                    fi
+                done
+
+                if [ -n "$prev_slot" ]; then
+                    echo -e "${GREEN}Previously assigned:${NC} Slot $prev_slot ($prev_slot_type)"
+                    echo ""
+                else
+                    echo -e "${YELLOW}No previous slot assignment found for this disk${NC}"
+                fi
+            fi
+        fi
 
         # Show which slots are already assigned
         if [ ${#assigned_slots[@]} -gt 0 ]; then
@@ -1495,6 +1551,9 @@ create_array() {
             echo -e " P or 0: Parity disk"
             echo -e " Q or 29: Second parity disk (optional)"
             echo -e " 1-28: Data disk"
+            if [ "$do_new_config" -eq 1 ] && [ -n "$prev_slot" ]; then
+                echo -e " o: Use old slot ($prev_slot - $prev_slot_type)"
+            fi
             echo -e " s: Skip this disk"
             echo -e " f: Finish array creation"
             read -r -p "Choice: " choice
@@ -1513,6 +1572,15 @@ create_array() {
                         slot="$choice"
                     else
                         echo -e "${RED}Invalid slot number. Please use 0-29.${NC}"
+                        continue
+                    fi
+                    ;;
+                [Oo])
+                    if [ "$do_new_config" -eq 1 ] && [ -n "$prev_slot" ]; then
+                        slot="$prev_slot"
+                        echo -e "${GREEN}Using previous slot assignment: $slot${NC}"
+                    else
+                        echo -e "${RED}No previous slot assigned for this disk.${NC}"
                         continue
                     fi
                     ;;
@@ -1572,6 +1640,33 @@ create_array() {
         run_nmd_command "label $array_label"
     fi
 
+    # Offer "parity is valid" option
+    if [ "$do_new_config" -eq 1 ]; then
+        echo ""
+        echo "If you have done the new configuration in a very particular way, you can mark the parity valid for the new array."
+        echo "This avoids parity reconstruction when starting the array."
+        echo ""
+        echo -e "Only do this if you are SURE the ${YELLOW}parity is already valid.${NC}"
+        read -r -p "Is the array parity already valid? (y/N): " parity_valid
+        if [[ "$parity_valid" =~ ^[Yy]$ ]]; then
+            echo -e "${YELLOW}Marking parity valid for the next array start.${NC}"
+            do_parity_skip=1
+            local invalidslot="98"
+            # mark Q valid only if it is still in the array
+            if [[ " ${assigned_slots[*]} " =~ " 29 " ]]; then
+                invalidslot="$invalidslot 99"
+            else
+                invalidslot="$invalidslot 29"
+            fi
+            if ! run_nmd_command "set invalidslot $invalidslot"; then
+                echo -e "${RED}Error: Failed to mark parity valid${NC}"
+                return 1
+            fi
+        else
+            echo -e "${YELLOW}Parity will require reconstruction when the array is started.${NC}"
+        fi
+    fi
+
     # Show array status
     echo ""
     show_status
@@ -1588,7 +1683,11 @@ create_array() {
     # XXX: FIXME: need to reload the module to reset internal state
     echo ""
     echo -e "${YELLOW}Note: You may need to reload the module to reset the internal state"
-    echo -e "if after parity reconstruction the array state is still DEGRADED.${NC}"
+    if [ "$do_parity_skip" -eq 1 ]; then
+        echo -e "if after array start the array state is still DEGRADED.${NC}"
+    else
+        echo -e "if after parity reconstruction the array state is still DEGRADED.${NC}"
+    fi
     echo -e "${YELLOW}Use: ${GREEN}nmdctl reload${NC}"
     return 0
 }
@@ -2073,6 +2172,7 @@ unassign_disk() {
 
 # Reload nonraid module with superblock
 reload_module() {
+    local quiet_mode="${1:-0}"
     check_root
 
     # Get current superblock path
@@ -2093,47 +2193,61 @@ reload_module() {
 
     # Check if superblock file exists, but allow non-existent files for creating new arrays
     if [ ! -f "$superblock" ]; then
-        echo -e "${YELLOW}Warning: Superblock file not found: $superblock${NC}"
-        echo -e "${YELLOW}This will create a new superblock when the array is started.${NC}"
+        if [ "$quiet_mode" -eq 0 ]; then
+            echo -e "${YELLOW}Warning: Superblock file not found: $superblock${NC}"
+            echo -e "${YELLOW}This will create a new superblock when the array is started.${NC}"
 
-        # Ask for confirmation if creating a new superblock
-        read -r -p "Continue with a new superblock? (y/N): " confirm
-        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-            echo "Operation cancelled."
-            return 1
+            # Ask for confirmation if creating a new superblock
+            read -r -p "Continue with a new superblock? (y/N): " confirm
+            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                echo "Operation cancelled."
+                return 1
+            fi
+            echo -e "Proceeding with new superblock at: ${GREEN}$superblock${NC}"
         fi
-        echo -e "Proceeding with new superblock at: ${GREEN}$superblock${NC}"
     fi
 
     # Check if module is loaded
     if ! lsmod | grep -q nonraid; then
-        echo -e "${YELLOW}NonRAID module not loaded. Loading with superblock: $superblock${NC}"
+        if [ "$quiet_mode" -eq 0 ]; then
+            echo -e "${YELLOW}NonRAID module not loaded. Loading with superblock: $superblock${NC}"
+        fi
         if ! modprobe nonraid super="$superblock"; then
             echo -e "${RED}Error: Failed to load nonraid module${NC}"
             return 1
         fi
-        echo -e "${GREEN}Successfully loaded nonraid module${NC}"
+        if [ "$quiet_mode" -eq 0 ]; then
+            echo -e "${GREEN}Successfully loaded nonraid module${NC}"
+        fi
         return 0
     fi
 
-    echo -e "${YELLOW}Stopping array and reloading nonraid module...${NC}"
+    if [ "$quiet_mode" -eq 0 ]; then
+        echo -e "${YELLOW}Stopping array and reloading nonraid module...${NC}"
+    fi
 
     # Stop array if it's running
     local mdstate=""
     if [ -f /proc/nmdstat ]; then
         mdstate=$(get_nmdstat_value "mdState")
         if [ "$mdstate" = "STARTED" ]; then
-            echo "Stopping array first..."
+            if [ "$quiet_mode" -eq 0 ]; then
+                echo "Stopping array first..."
+            fi
             if ! run_nmd_command "stop"; then
                 echo -e "${RED}Error: Failed to stop array. Cannot safely reload module.${NC}"
                 return 1
             fi
-            echo -e "Array stopped successfully."
+            if [ "$quiet_mode" -eq 0 ]; then
+                echo -e "Array stopped successfully."
+            fi
         fi
     fi
 
     # Unload module
-    echo "Unloading nonraid module..."
+    if [ "$quiet_mode" -eq 0 ]; then
+        echo "Unloading nonraid module..."
+    fi
     if ! modprobe -r nonraid; then
         echo -e "${RED}Error: Failed to unload nonraid module. It may be in use.${NC}"
         return 1
@@ -2143,13 +2257,17 @@ reload_module() {
     sleep 1
 
     # Load module with specified superblock
-    echo "Loading nonraid module with superblock: $superblock"
+    if [ "$quiet_mode" -eq 0 ]; then
+        echo "Loading nonraid module with superblock: $superblock"
+    fi
     if ! modprobe nonraid super="$superblock"; then
         echo -e "${RED}Error: Failed to reload nonraid module${NC}"
         return 1
     fi
 
-    echo -e "${GREEN}Successfully reloaded nonraid module with superblock: $superblock${NC}"
+    if [ "$quiet_mode" -eq 0 ]; then
+        echo -e "${GREEN}Successfully reloaded nonraid module with superblock: $superblock${NC}"
+    fi
     return 0
 }
 

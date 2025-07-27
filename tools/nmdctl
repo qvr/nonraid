@@ -951,29 +951,16 @@ get_disk_size_kb() {
     fi
 
     # Use blockdev to get exact size in 512-byte sectors
-    if command -v blockdev >/dev/null 2>&1; then
-        local sectors=$(blockdev --getsz "$device" 2>/dev/null)
-        if [ -n "$sectors" ]; then
-            # Round down to nearest multiple of 8 sectors (driver reads/writes 8 sectors at a time)
-            local adjusted_sectors=$(( (sectors / 8) * 8 ))
-            # Convert to 1K blocks (2 sectors = 1KB)
-            local kb_size=$(( adjusted_sectors / 2 ))
-            echo "$kb_size"
-            return 0
-        fi
-    fi
-
-    # Fallback to fdisk if blockdev not available
-    local sectors=$(fdisk -l "$device" 2>/dev/null | grep "^Disk $device" | awk '{print $7}')
+    local sectors=$(blockdev --getsz "$device" 2>/dev/null)
     if [ -n "$sectors" ]; then
         # Round down to nearest multiple of 8 sectors (driver reads/writes 8 sectors at a time)
         local adjusted_sectors=$(( (sectors / 8) * 8 ))
         # Convert to 1K blocks (2 sectors = 1KB)
         local kb_size=$(( adjusted_sectors / 2 ))
         echo "$kb_size"
-    else
-        return 1
+        return 0
     fi
+    return 1
 }
 
 # Find disk device name matching the ID in nmdstat

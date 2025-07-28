@@ -1358,18 +1358,14 @@ list_available_devices() {
             local partition=""
             if [ -b "${dev}1" ]; then
                 partition="${dev}1"
-            elif [ -b "${dev}p1" ]; then
-                partition="${dev}p1"
             else
                 continue  # Skip if we can't find the partition
             fi
 
-            # Get device details using a more reliable approach
-            # Get disk ID without using xargs and pipeline
+            # Get device details
             local disk_id=""
             if [ -d "/dev/disk/by-id" ]; then
                 local dev_name=$(basename "$dev")
-                # Use a safer approach to find the matching disk ID
                 for id_path in /dev/disk/by-id/*; do
                     if [ -L "$id_path" ] && [[ "$id_path" != *-part* ]]; then
                         local link_target=$(readlink -f "$id_path")

@@ -4,12 +4,14 @@
 # nmdctl - NonRAID array management utility
 #
 
-
 # Check for bash version 4 or higher (needed for associative arrays)
 if ((BASH_VERSINFO[0] < 4)); then
     echo "Error: This script requires bash version 4 or higher"
     exit 1
 fi
+
+# Our version
+VERSION=1.1.0
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -57,6 +59,7 @@ usage() {
     echo "  -k, --keyfile PATH          Path to LUKS keyfile to use during mounting (default: $LUKS_KEYFILE)"
     echo "  -u, --unattended            Enable unattended mode, will import and start a healthy array without prompts"
     echo "  -v, --verbose               Enable verbose output"
+    echo "  -V, --version               Display version information"
     echo "  -h, --help                  Display this help message"
     echo ""
     exit 1
@@ -2650,6 +2653,10 @@ main() {
                 YELLOW=""
                 NC=""
                 shift
+                ;;
+            "-V"|"--version")
+                echo "nmdctl version $VERSION"
+                exit 0
                 ;;
             "-h"|"--help"|"help")
                 usage

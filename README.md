@@ -245,7 +245,9 @@ As the driver is not intended to be used manually, normally the UnRAID UI makes 
 - ~~systemd service definition to handle array start/stop~~
 
 ## License
-This project is licensed under the GNU General Public License v2.0 (GPL-2.0) - the same license as the Linux kernel, and the `md_unraid` driver itself.
+This project is licensed under the GNU General Public License v2.0 (GPL-2.0) - the same license as the Linux kernel, and the `md_unraid` driver itself. See [LICENSE](LICENSE) for the full license text.
+
+Individual Linux kernel source files (under `raid6_pq/`, `md_nonraid`, or the upstream changes tracking branch `upstream`) may have a different license, or be provided under a dual license, but the overall Linux Kernel is GPL-2.0 licensed, with their syscall exception. (See Linux Kernel `Documentation/process/license-rules.rst` for details on kernel licensing rules.)
 
 ## Disclaimer
 Unraid is a trademark of Lime Technology, Inc. This project is not affiliated with Lime Technology, Inc. in any way.

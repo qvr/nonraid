@@ -242,6 +242,59 @@ format_array_state() {
     esac
 }
 
+# Check if the nonraid driver is in an inconsistent state
+# Returns 0 if inconsistent, 1 if consistent
+check_driver_inconsistent_state() {
+    # If NMDSTAT_VALUES is empty, populate it first
+    if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
+        get_all_nmdstat_values NMDSTAT_VALUES
+    fi
+
+    # Get the mdnum* counter values
+    local mdnummissing="${NMDSTAT_VALUES[mdNumMissing]:-0}"
+    local mdnuminvalid="${NMDSTAT_VALUES[mdNumInvalid]:-0}"
+    local mdnumwrong="${NMDSTAT_VALUES[mdNumWrong]:-0}"
+    local mdnumdisabled="${NMDSTAT_VALUES[mdNumDisabled]:-0}"
+    local mdnumreplaced="${NMDSTAT_VALUES[mdNumReplaced]:-0}"
+    local mdnumnew="${NMDSTAT_VALUES[mdNumNew]:-0}"
+
+    # Check if any counter has a value > 0
+    local has_counter_activity=0
+    if [ "$mdnummissing" -gt 0 ] || [ "$mdnuminvalid" -gt 0 ] ||
+       [ "$mdnumwrong" -gt 0 ] || [ "$mdnumdisabled" -gt 0 ] ||
+       [ "$mdnumreplaced" -gt 0 ] || [ "$mdnumnew" -gt 0 ]; then
+        has_counter_activity=1
+    fi
+
+    # If counters are clean, there's at least no known driver state inconsistency
+    if [ "$has_counter_activity" -eq 0 ]; then
+        return 1
+    fi
+
+    # If array is empty, we should be OK for now
+    if [ "$(get_defined_slots_count)" -eq 0 ]; then
+        return 1
+    fi
+
+    # Check if all defined disks are in DISK_OK state
+    local all_disks_ok=1
+    for slot in $(get_defined_slots); do
+        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$slot]}"
+        if [ "$rdevstatus" != "DISK_OK" ]; then
+            all_disks_ok=0
+            break
+        fi
+    done
+
+    # Inconsistent state: counters show activity but all disks are OK
+    if [ "$all_disks_ok" -eq 1 ]; then
+        return 0
+    fi
+
+    # No known inconsistencies found
+    return 1
+}
+
 # Get count of defined disk slots in the array
 # Returns the count of all slots with a defined disk
 get_defined_slots_count() {
@@ -447,6 +500,16 @@ show_status() {
 
     # Show array summary (state, label, superblock, disks present)
     show_array_summary
+
+    # Check for driver inconsistent state and show warning
+    if check_driver_inconsistent_state; then
+        echo ""
+        echo -e "${YELLOW}WARNING: Driver internal state is inconsistent!${NC}"
+        echo -e "${YELLOW}The array mdNum* counters show non-zero values, but all individual disks are DISK_OK status.${NC}"
+        echo -e "${YELLOW}This can happen after initial array creation, but it may cause unexpected behavior.${NC}"
+        echo -e "${YELLOW}Recommend reloading the driver and starting the array again: ${GREEN}nmdctl reload && nmdctl start${NC}"
+        echo ""
+    fi
 
     # Show array health status
     determine_array_health

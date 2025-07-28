@@ -108,8 +108,7 @@ check_module_loaded() {
                 echo -e "Attempting to create array with: ${YELLOW}$superblock${NC}"
                 echo -e ""
                 echo -e "This could accidentally modify the wrong superblock file."
-                echo -e "Please unload the module first with: ${YELLOW}modprobe -r nonraid${NC}"
-                echo -e "Or use: ${YELLOW}nmdctl --super $superblock reload${NC}"
+                echo -e "Explicitly reload the module with the new superblock with: ${YELLOW}nmdctl --super $superblock reload${NC}"
                 return 1
             fi
         fi

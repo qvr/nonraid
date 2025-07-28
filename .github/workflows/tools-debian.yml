@@ -3,6 +3,11 @@ name: Build nonraid-tools Debian Package
 on:
   workflow_dispatch:
     inputs:
+      create_release:
+        description: 'Create GitHub release'
+        required: false
+        default: false
+        type: boolean
       prerelease:
         description: 'Create as prerelease'
         required: false
@@ -20,13 +25,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get Next Version Number
-        id: get-version
+      - name: Get nmdctl version
+        id: get-nmdctl
         run: |
-          # Get count of existing nonraid-tools tags and increment by 1
-          NEXT_VERSION=$(git tag -l "nonraid-tools-*" | wc -l)
-          NEXT_VERSION=$((NEXT_VERSION + 1))
-          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+          # Get the version from the nmdctl binary
+          VERSION=$(grep VERSION= tools/nmdctl | cut -d= -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Get Next Build Number
+        id: get-build
+        run: |
+          NEXT_BUILD=$(git tag -l "nonraid-tools-${{ steps.get-nmdctl.outputs.version }}-*" | wc -l)
+          NEXT_BUILD=$((NEXT_BUILD + 1))
+          echo "build=$NEXT_BUILD" >> $GITHUB_OUTPUT
 
       - name: Install Debian Package Building Dependencies
         run: |
@@ -36,24 +47,34 @@ jobs:
       - name: Create Debian Package
         run: |
           cd tools
+          sed -i "s/1.0.0-1/${{ steps.get-nmdctl.outputs.version }}-${{ steps.get-build.outputs.build }}/" debian/changelog
           cp systemd/nonraid.service debian/nonraid-tools.nonraid.service
           dpkg-buildpackage -b -rfakeroot -us -uc
 
+      - name: Upload Debian Package as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nonraid-tools-${{ steps.get-nmdctl.outputs.version }}-${{ steps.get-build.outputs.build }}
+          path: "*.deb"
+          retention-days: 30
+
       - name: Create Release
+        if: ${{ github.event.inputs.create_release == 'true' }}
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           prerelease: ${{ github.event.inputs.prerelease }}
-          tag_name: nonraid-tools-${{ steps.get-version.outputs.version }}
-          name: NonRAID Tools Debian Package - Build ${{ steps.get-version.outputs.version }}
+          tag_name: nonraid-tools-${{ steps.get-nmdctl.outputs.version }}-${{ steps.get-build.outputs.build }}
+          name: NonRAID Tools Debian Package - Version ${{ steps.get-nmdctl.outputs.version }} Build ${{ steps.get-build.outputs.build }}
           body: |
-            **NonRAID Tools Package - Build ${{ steps.get-version.outputs.version }}**
+            **NonRAID Tools Package - Version ${{ steps.get-nmdctl.outputs.version }} Build ${{ steps.get-build.outputs.build }}**
 
             This release contains the NonRAID array management tools package for Ubuntu/Debian systems.
 
             ## What's Included
             - `/usr/bin/nmdctl`
+            - `nonraid.service` systemd unit file
 
             ## Installation
             ```bash

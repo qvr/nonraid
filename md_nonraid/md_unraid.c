@@ -127,7 +127,7 @@ mdk_thread_t *md_register_thread(void (*run)(mddev_t *, unsigned long),
 {
 	mdk_thread_t *thread;
 
-	dprintk("md: registering MD-thread %s\n", name);
+	dprintk("nmd: registering MD-thread %s\n", name);
 
 	thread = kzalloc(sizeof(mdk_thread_t), GFP_KERNEL);
 	if (!thread)
@@ -149,7 +149,7 @@ mdk_thread_t *md_register_thread(void (*run)(mddev_t *, unsigned long),
 
 void md_unregister_thread(mdk_thread_t *thread)
 {
-	dprintk("md: unregistering MD-thread pid %d\n", task_pid_nr(thread->tsk));
+	dprintk("nmd: unregistering MD-thread pid %d\n", task_pid_nr(thread->tsk));
 
 	/* kthread_stop() sets kthread_should_stop() for task to return true,
 	 * wakes it, and waits for it to exit.
@@ -161,7 +161,7 @@ void md_unregister_thread(mdk_thread_t *thread)
 void md_wakeup_thread(mdk_thread_t *thread)
 {
 	if (thread) {
-//		dprintk("md: waking up MD-thread %s\n", thread->tsk->comm);
+//		dprintk("nmd: waking up MD-thread %s\n", thread->tsk->comm);
 		set_bit(THREAD_WAKEUP, &thread->flags);
 		wake_up(&thread->wqueue);
 	}
@@ -171,7 +171,7 @@ void md_interrupt_thread(mdk_thread_t *thread)
 {
 	BUG_ON(!thread->tsk);
 
-	dprintk("md: interrupting MD-thread pid %d\n", task_pid_nr(thread->tsk));
+	dprintk("nmd: interrupting MD-thread pid %d\n", task_pid_nr(thread->tsk));
 	send_sig(SIGKILL, thread->tsk, 1);
 }
 
@@ -335,25 +335,25 @@ static int convert_sb(mdp_super_t * sb)
 /* read the superblock */
 static int md_read_sb(mddev_t *mddev)
 {
-	dprintk("md: reading superblock\n");
+	dprintk("nmd: reading superblock\n");
 	if (read_file(super, &mddev->sb, MD_SB_BYTES) != MD_SB_BYTES) {
-		printk("md: could not read superblock from %s\n", super);
+		printk("nmd: could not read superblock from %s\n", super);
 		return -EINVAL;
 	}
 
 	/* check for validity */
 	if (mddev->sb.md_magic != MD_SB_MAGIC) {
-		printk("md: invalid superblock magic\n");
+		printk("nmd: invalid superblock magic\n");
 		return -EINVAL;
 	}
 	if (calc_sb_csum(&mddev->sb) != mddev->sb.sb_csum) {
-		printk("md: invalid superblock checksum\n");
+		printk("nmd: invalid superblock checksum\n");
 		return -EINVAL;
 	}
 
 	/* check for old version */
 	if (mddev->sb.major_version != MD_MAJOR_VERSION) {
-		printk("md: converting superblock version %d to version %d\n",
+		printk("nmd: converting superblock version %d to version %d\n",
 			mddev->sb.major_version, MD_MAJOR_VERSION);
 		if (convert_sb(&mddev->sb) != 0)
 			return -EINVAL;
@@ -365,7 +365,7 @@ static int md_read_sb(mddev_t *mddev)
                 mark_disk_active(&mddev->sb.disks[MD_SB_Q_IDX]);
 	}
 
-        dprintk("md: superblock events: %d\n", mddev->sb.events);
+        dprintk("nmd: superblock events: %d\n", mddev->sb.events);
 	return 0;
 }
 
@@ -384,9 +384,9 @@ int md_update_sb(mddev_t *mddev)
 	mddev->sb.sb_csum = calc_sb_csum(&mddev->sb);
 
 	/* write the superblock */
- 	dprintk("md: writing superblock to %s\n", super);
+ 	dprintk("nmd: writing superblock to %s\n", super);
 	if (write_file(super, &mddev->sb, MD_SB_BYTES) != MD_SB_BYTES) {
-		printk("md: could not write superblock file: %s\n", super);
+		printk("nmd: could not write superblock file: %s\n", super);
 		retval = -EINVAL;
 	}
 
@@ -444,14 +444,14 @@ static int import_device(mdk_rdev_t *rdev, char *name,
 
 	/* check if device assigned to slot */
         if (size == 0) {
-		dprintk("md: import disk%d: no device\n", unit);
+		dprintk("nmd: import disk%d: no device\n", unit);
 		return -ENODEV;
 	}
 
 	/* open the disk device */
 	err = lock_bdev(name, rdev);
 	if (err) {
-		printk("md: import disk%d: lock_bdev error: %d\n", unit, err);
+		printk("nmd: import disk%d: lock_bdev error: %d\n", unit, err);
 		return err; /* device probably not present */
 	}
 
@@ -468,7 +468,7 @@ static int import_device(mdk_rdev_t *rdev, char *name,
 
 	/* disk is present */
 	rdev->status = DISK_OK;
-	printk("md: import disk%d: (%s) %s size: %llu %s\n",
+	printk("nmd: import disk%d: (%s) %s size: %llu %s\n",
 	       unit, rdev->name, rdev->id, rdev->size, erased ? "erased" : "");
 
 	unlock_bdev(rdev);
@@ -595,7 +595,7 @@ static mddev_t *alloc_mddev(dev_t dev)
 	/* create our recovery thread */
 	mddev->recovery_thread = md_register_thread(md_do_recovery, mddev, 0, "mdrecoveryd");
 	if (!mddev->recovery_thread) {
-		printk("md: bug: couldn't allocate mdrecoveryd\n");
+		printk("nmd: bug: couldn't allocate mdrecoveryd\n");
 		free_mddev(mddev);
 		return NULL;
 	}
@@ -605,7 +605,7 @@ static mddev_t *alloc_mddev(dev_t dev)
 
 	/* read the superblock */
 	if (md_read_sb(mddev)) {
-		printk("md: initializing superblock\n");
+		printk("nmd: initializing superblock\n");
 		init_sb(&mddev->sb);
 		mark_sb_clean(&mddev->sb);
 	}
@@ -710,7 +710,7 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 	mdk_rdev_t *rdev = &mddev->rdev[slot];
 
 	if (mddev->private) {
-		printk("md: import_slot: already started\n");
+		printk("nmd: import_slot: already started\n");
 		return -EINVAL;
 	}
 
@@ -725,7 +725,7 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 		if (disk_enabled(disk)) {
 			if (rdev->status == DISK_NP) {
                                 if (disk_valid(disk)) {
-                                        printk("md: import_slot: %d missing\n", disk->number);
+                                        printk("nmd: import_slot: %d missing\n", disk->number);
                                         rdev->status = DISK_NP_MISSING;
                                         mddev->num_missing++;
                                 }
@@ -737,7 +737,7 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 			}
 			else if (!same_disk_info(disk, rdev, 0)) {
                                 if (disk_valid(disk)) {
-                                        printk("md: import_slot: %d wrong\n", disk->number);
+                                        printk("nmd: import_slot: %d wrong\n", disk->number);
                                         rdev->status = DISK_WRONG;
                                         mddev->num_wrong++;
                                 }
@@ -751,11 +751,11 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 		}
 		else {
 			if (rdev->status == DISK_NP) {
-				printk("md: import_slot: %d empty\n", disk->number);
+				printk("nmd: import_slot: %d empty\n", disk->number);
 				rdev->status = DISK_NP_DSBL;
 			}
 			else if (!same_disk_info(disk, rdev, 0)) {
-				printk("md: import_slot: %d replaced\n", disk->number);
+				printk("nmd: import_slot: %d replaced\n", disk->number);
 				rdev->status = DISK_DSBL_NEW;
 				mddev->num_replaced++;
 			}
@@ -777,7 +777,7 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 
                 disk->state = 0;
                 if (rdev->status == DISK_OK) {
-                        printk("md: disk%d new disk\n", disk->number);
+                        printk("nmd: disk%d new disk\n", disk->number);
 
                         rdev->status = DISK_NEW;
                         mddev->num_new++;
@@ -866,7 +866,7 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 /* called on read error, with device_lock held */
 void md_read_error(mddev_t *mddev, int disk_number, sector_t sector)
 {
-        printk("md: disk%d read error, sector=%llu\n", disk_number, (unsigned long long)sector);
+        printk("nmd: disk%d read error, sector=%llu\n", disk_number, (unsigned long long)sector);
         mddev->rdev[disk_number].errors++;
 }
 
@@ -877,7 +877,7 @@ int md_write_error(mddev_t *mddev, int disk_number, sector_t sector)
         mdk_rdev_t *rdev = &mddev->rdev[disk_number];
         int update_sb = 0;
 
-        printk("md: disk%d write error, sector=%llu\n", disk_number, (unsigned long long)sector);
+        printk("nmd: disk%d write error, sector=%llu\n", disk_number, (unsigned long long)sector);
         rdev->errors++;
 
 	if (disk_active(disk)) {
@@ -998,7 +998,7 @@ static int do_run(mddev_t *mddev)
                 if (!strstr(rdev->status, "DISK_NP")) {
 			err = lock_bdev(rdev->name, rdev);
 			if (err) {
-				printk("md: do_run: lock_bdev error: %d\n", err);
+				printk("nmd: do_run: lock_bdev error: %d\n", err);
 				return err; /* partition not present */
 			}
 			/* sync device & invalidate cache buffers */
@@ -1010,7 +1010,7 @@ static int do_run(mddev_t *mddev)
 	/* alloc transfer resources */
 	err = unraid_run(mddev);
 	if (err) {
-		printk("md: unraid_run: failed: %d\n", err);
+		printk("nmd: unraid_run: failed: %d\n", err);
 		return -EINVAL;
 	}
 
@@ -1102,9 +1102,9 @@ void md_sync_error(mddev_t *mddev, sector_t sector, char *message)
         
         /* limit number of messages generated */
         if (sb->sync_errs <= SYNC_ERROR_LIMIT)
-                printk("md: recovery thread: %s, sector=%llu\n", message, (unsigned long long)sector);
+                printk("nmd: recovery thread: %s, sector=%llu\n", message, (unsigned long long)sector);
         if (sb->sync_errs == SYNC_ERROR_LIMIT+1)
-                printk("md: recovery thread: stopped logging\n");
+                printk("nmd: recovery thread: stopped logging\n");
 }
 
 /* called when a stripe sync completes */
@@ -1157,13 +1157,13 @@ static int md_do_sync(mddev_t *mddev)
 			mark[last_mark] = jiffies;
 			mark_cnt[last_mark] = mddev->curr_resync - atomic_read(&mddev->recovery_active);
 
-			dprintk("md: curr_resync=%llu delta=%llu\n",
+			dprintk("nmd: curr_resync=%llu delta=%llu\n",
                                 mddev->curr_resync, mark_cnt[last_mark] - prev_cnt);
 		}
 
 		if (signal_pending(current)) {
 			/* got a signal, exit */
-			dprintk("md: md_do_sync: got signal, exit...\n");
+			dprintk("nmd: md_do_sync: got signal, exit...\n");
 			flush_signals(current);
 			err = -EINTR;
 			break;
@@ -1184,7 +1184,7 @@ static void md_do_recovery(mddev_t *mddev, unsigned long unused)
 
 	/* if nothing to resync, get out now */
 	if (!mddev->recovery_size) {
-		printk("md: recovery thread: nothing to resync\n");
+		printk("nmd: recovery thread: nothing to resync\n");
 		return;
 	}
 
@@ -1192,11 +1192,11 @@ static void md_do_recovery(mddev_t *mddev, unsigned long unused)
 	 * or -EINTR if the process was interrupted with a signal.
 	 */
 	if (mutex_lock_interruptible(&mddev->recovery_sem)) {
-		printk("md: recovery thread: signal pending?\n");
+		printk("nmd: recovery thread: signal pending?\n");
 		flush_signals(current);
 		return;
 	}
-        printk("md: recovery thread: %s ...\n", mddev->recovery_action);
+        printk("nmd: recovery thread: %s ...\n", mddev->recovery_action);
 	mddev->recovery_running = mddev->recovery_size*2; /* count of sectors */
 
         /* record start of resync */
@@ -1233,7 +1233,7 @@ static void md_do_recovery(mddev_t *mddev, unsigned long unused)
                 }
 
                 mddev->curr_resync = 0;
-                printk("md: sync done. time=%usec\n", sb->stime2 - sb->stime);
+                printk("nmd: sync done. time=%usec\n", sb->stime2 - sb->stime);
 	}
 
 	/* record sync result */
@@ -1242,7 +1242,7 @@ static void md_do_recovery(mddev_t *mddev, unsigned long unused)
 	mddev->recovery_running = 0;
 	mutex_unlock(&mddev->recovery_sem);
 
-	printk("md: recovery thread: exit status: %d\n", sb->sync_exit);
+	printk("nmd: recovery thread: exit status: %d\n", sb->sync_exit);
 }
 
 /****************************************************************************/
@@ -1257,19 +1257,19 @@ static int start_array(dev_t array_dev, char *state)
         int update_sb = 0;
 
 	if (mddev->private) {
-		printk("md: start_array: already started\n");
+		printk("nmd: start_array: already started\n");
 		return -EINVAL;
 	}
 
 	/* ensure valid state */
 	if (strstr(mddev->state, "ERROR:")) {
-		printk("md: start_array: %s\n", mddev->state);
+		printk("nmd: start_array: %s\n", mddev->state);
 		return -EINVAL;
 	}
 	
 	/* ensure no state change */
 	if (strcmp(state, mddev->state)) {
-		printk("md: start_array: state %s does't match %s\n", state, mddev->state);
+		printk("nmd: start_array: state %s does't match %s\n", state, mddev->state);
 		return -EINVAL;
 	}
 
@@ -1285,11 +1285,11 @@ static int start_array(dev_t array_dev, char *state)
 				/* Check if this is a "real" active disk vs auto-activated parity */
 				if (disk_enabled(disk) && disk_valid(disk)) {
 					/* This disk has full state (7) - it was genuinely active */
-					printk("md: start_array: active disk %d not imported\n", i);
+					printk("nmd: start_array: active disk %d not imported\n", i);
 					return -EINVAL;
 				} else if (i != MD_SB_P_IDX && i != MD_SB_Q_IDX) {
 					/* Non-parity disk that's only "active" (state=4) should also be imported */
-					printk("md: start_array: active data disk %d not imported\n", i);
+					printk("nmd: start_array: active data disk %d not imported\n", i);
 					return -EINVAL;
 				}
 				/* Otherwise it's likely an auto-activated parity disk, which is OK */
@@ -1304,9 +1304,9 @@ static int start_array(dev_t array_dev, char *state)
 		int i;
 
                 if (invalidslota != MD_SB_P_IDX)
-                        printk("md: invalidslota=%d\n", invalidslota);
+                        printk("nmd: invalidslota=%d\n", invalidslota);
                 if (invalidslotb != MD_SB_Q_IDX)
-                        printk("md: invalidslotb=%d\n", invalidslotb);
+                        printk("nmd: invalidslotb=%d\n", invalidslotb);
 
                 sb->num_disks = 2;
                 mddev->num_disabled = 0;
@@ -1530,7 +1530,7 @@ static int stop_array(dev_t array_dev, int notifier)
 	/* check if still in use */
 	active = atomic_read(&mddev->active);
 	if (active) {
-		printk("md: %d devices still in use.\n", active);
+		printk("nmd: %d devices still in use.\n", active);
 		return -EBUSY;
 	}
 
@@ -1561,11 +1561,11 @@ static int check_array(dev_t array_dev, char *option, unsigned long long offset)
         int recovery_option, recovery_resume;
 
 	if (!mddev->private) {
-		printk("md: check_array: not started\n");
+		printk("nmd: check_array: not started\n");
 		return -EINVAL;
 	}
 	if (sb->num_disks <= 2) {
-		printk("md: check_array: no devices\n");
+		printk("nmd: check_array: no devices\n");
 		return -EINVAL;
 	}
 
@@ -1582,12 +1582,12 @@ static int check_array(dev_t array_dev, char *option, unsigned long long offset)
                 recovery_resume = 1;
 	}
 	else {
-		printk("md: check_array: invalid option: %s\n", option);
+		printk("nmd: check_array: invalid option: %s\n", option);
 		return -EINVAL;
 	}
         /* validate offset */
         if (offset >= (mddev->recovery_size*2) || (offset%8)) {
-		printk("md: check_array: invalid offset %llu\n", offset);
+		printk("nmd: check_array: invalid offset %llu\n", offset);
 		return -EINVAL;
 	}
 
@@ -1619,7 +1619,7 @@ static int nocheck_array(dev_t array_dev, char *option)
         int recovery_pause;
 
 	if (!mddev->private) {
-		printk("md: nocheck_array: not started\n");
+		printk("nmd: nocheck_array: not started\n");
 		return -EINVAL;
 	}
 
@@ -1629,7 +1629,7 @@ static int nocheck_array(dev_t array_dev, char *option)
 	else if (strcasecmp(option, "PAUSE") == 0)
 		recovery_pause = 1;
 	else {
-		printk("md: nocheck_array: invalid option: %s\n", option);
+		printk("nmd: nocheck_array: invalid option: %s\n", option);
 		return -EINVAL;
 	}
 
@@ -1651,12 +1651,12 @@ static int label_array(dev_t array_dev, char *label)
 	mddev_t *mddev = dev_to_mddev(array_dev);
 
 	if (mddev->private) {
-		printk("md: label_array: already started\n");
+		printk("nmd: label_array: already started\n");
 		return -EINVAL;
 	}
 
         if (strlen(label) >= sizeof(mddev->sb.label)) {
-		printk("md: label_array: invalid label\n");
+		printk("nmd: label_array: invalid label\n");
 		return -EINVAL;
         }
 
@@ -2187,12 +2187,12 @@ static const struct proc_ops md_proc_stat_fops = {
 static int md_notify_reboot(struct notifier_block *this,
 			    unsigned long code, void *x)
 {
-        printk("md: md_notify_reboot\n");
+        printk("nmd: md_notify_reboot\n");
 	if ((code == SYS_DOWN) ||
 	    (code == SYS_HALT) ||
 	    (code == SYS_POWER_OFF)) {
 
-		printk("md: stopping all md devices\n");
+		printk("nmd: stopping all md devices\n");
 		stop_array(MKDEV(MAJOR_NR,0), 1);
 	}
 	return NOTIFY_DONE;
@@ -2208,7 +2208,7 @@ static int __init md_init(void)
 {
 	dev_t array_dev = MKDEV(MAJOR_NR,0);
 
-	printk("md: unRAID driver %d.%d.%d installed\n",
+	printk("nmd: nonRAID: unRAID compatible driver %d.%d.%d installed\n",
 	       MD_MAJOR_VERSION, MD_MINOR_VERSION,
 	       MD_PATCHLEVEL_VERSION);
 
@@ -2218,7 +2218,7 @@ static int __init md_init(void)
 	}
 
 	if ((md_wq = alloc_workqueue("md", WQ_MEM_RECLAIM, 0)) == NULL) {
-		printk("md: unable to alloc_workqueue for md\n");
+		printk("nmd: unable to alloc_workqueue for md\n");
 		return -ENOMEM;
 	}
 
@@ -2237,7 +2237,7 @@ static __exit void md_exit(void)
 	destroy_workqueue(md_wq);
 	unregister_blkdev(MAJOR_NR, "nmd");
 
-	printk("md: unRAID driver removed\n");
+	printk("nmd: nonRAID: unRAID compatible driver removed\n");
 }
 
 module_init(md_init);

@@ -3,6 +3,11 @@ name: Build nonraid-dkms Debian Package
 on:
   workflow_dispatch:
     inputs:
+      create_release:
+        description: 'Create GitHub release'
+        required: false
+        default: false
+        type: boolean
       prerelease:
         description: 'Create as prerelease'
         required: false
@@ -23,41 +28,65 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get Next Version Number
-        id: get-version
+      - name: Get dkms version
+        id: get-dkms
         run: |
-          # Get count of existing nonraid-dkms tags and increment by 1
-          NEXT_VERSION=$(git tag -l "nonraid-dkms-*" | wc -l)
-          NEXT_VERSION=$((NEXT_VERSION + 1))
-          echo "version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+          # Get the version from the dkms.conf
+          VERSION=$(grep PACKAGE_VERSION= dkms.conf | cut -d= -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Get Next Build Number
+        id: get-build
+        run: |
+          NEXT_BUILD=$(git tag -l "nonraid-dkms-${{ steps.get-dkms.outputs.version }}-*" | wc -l)
+          NEXT_BUILD=$((NEXT_BUILD + 1))
+          echo "build=$NEXT_BUILD" >> $GITHUB_OUTPUT
 
       - name: Install Debian Package Building Dependencies
         run: sudo bash debian/install_pkg_build_deps.sh
 
       - name: Create Debian Package
-        run: make clean package
+        run: |
+          sed -i "s/1.0.0-1/${{ steps.get-dkms.outputs.version }}-${{ steps.get-build.outputs.build }}/" debian/changelog
+          make clean package
+
+      - name: Workaround actions/upload-artifact#176
+        run: |
+          echo "artifacts_path=$(realpath ..)" >> $GITHUB_ENV
+
+      - name: Upload Debian Package as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nonraid-dkms-${{ steps.get-dkms.outputs.version }}-${{ steps.get-build.outputs.build }}
+          path: |
+            ${{ env.artifacts_path }}/nonraid-dkms_*.deb
+            ${{ env.artifacts_path }}/nonraid-dkms_*.changes
+            ${{ env.artifacts_path }}/nonraid-dkms_*.buildinfo
+          retention-days: 30
 
       - name: Create Release
+        if: github.event.inputs.create_release == 'true'
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           prerelease: ${{ github.event.inputs.prerelease }}
-          tag_name: nonraid-dkms-${{ steps.get-version.outputs.version }}
-          name: NonRAID DKMS Debian Package - Build ${{ steps.get-version.outputs.version }}
+          tag_name: nonraid-dkms-${{ steps.get-dkms.outputs.version }}-${{ steps.get-build.outputs.build }}
+          name: NonRAID DKMS Debian Package - Version ${{ steps.get-dkms.outputs.version }} Build ${{ steps.get-build.outputs.build }}
           body: |
-            **NonRAID DKMS Package - Build ${{ steps.get-version.outputs.version }}**
+            **NonRAID DKMS Package - Version ${{ steps.get-dkms.outputs.version }} Build ${{ steps.get-build.outputs.build }}**
 
             This release contains the NonRAID kernel driver DKMS package for Ubuntu/Debian systems.
 
             ## What's Included
             - `nonraid-dkms` package with kernel module source and build scripts
-            - Compatible with kernel versions 6.6 - 6.8
-            - Tested on Ubuntu 24.04 LTS
+            - Compatible with kernel versions **6.6 - 6.8** and **6.11 and later** (tested on 6.14) (6.9 and 6.10 are not supported)
+            - Tested on Ubuntu 24.04 LTS (with GA kernel 6.8 and HWE kernels 6.11, 6.14)
 
             ## Installation
             ```bash
-            sudo dpkg -i nonraid-dkms_*.deb
+            sudo apt install dkms linux-headers-$(uname -r) build-essential
+            sudo apt install ./nonraid-dkms_*.deb
             sudo update-initramfs -u -k all
             # Reboot required
             ```

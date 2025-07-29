@@ -596,15 +596,19 @@ show_resync_status() {
     local mdresynccorr="${NMDSTAT_VALUES[mdResyncCorr]}"
 
     # Check for pending disk clearing
+    local array_start_maybe="Start the array and use"
+    if [ "${NMDSTAT_VALUES[mdState]}" = "STARTED" ]; then
+        array_start_maybe="Use"
+    fi
     if [ "$mdresync" = "0" ] && [ "$mdresyncaction" = "clear" ]; then
         echo ""
         echo -e "${YELLOW}Disk clearing pending: New disk needs to be cleared${NC}"
-        echo -e "${YELLOW}Start the array and use '${GREEN}nmdctl check${YELLOW}' command to start the disk clear${NC}"
+        echo -e "${YELLOW}${array_start_maybe} '${GREEN}nmdctl check${YELLOW}' command to start the disk clear${NC}"
     # Check for pending reconstruction
     elif [ "$mdresync" = "0" ] && [[ "$mdresyncaction" == recon* ]]; then
         echo ""
         echo -e "${YELLOW}Disk reconstruction pending: ${BLUE}$mdresyncaction${NC}"
-        echo -e "${YELLOW}Start the array and use '${GREEN}nmdctl check${YELLOW}' command to start the reconstruction${NC}"
+        echo -e "${YELLOW}${array_start_maybe} '${GREEN}nmdctl check${YELLOW}' command to start the reconstruction${NC}"
     # Check for active reconstruction or check operation
     elif [ "$mdresync" != "0" ] && [ -n "$mdresync" ]; then
         local mdresyncpos="${NMDSTAT_VALUES[mdResyncPos]}"

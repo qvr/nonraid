@@ -1677,7 +1677,7 @@ static void handle_flush(mddev_t *mddev, int unit, struct bio *bi)
 	flush_stripe_t *flush_stripe = kzalloc(sizeof(flush_stripe_t), GFP_KERNEL);
 
 	if (flush_stripe == NULL) {
-		printk("md: handle_flush: could not allocate flush_stripe!\n");
+		printk("nmd: handle_flush: could not allocate flush_stripe!\n");
 		bi->bi_status = BLK_STS_RESOURCE;
 		bio_endio(bi);
 		return;

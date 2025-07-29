@@ -15,7 +15,10 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 > Use at your own risk, and always have backups!
 
 ## Installation
-This has been tested on Ubuntu 24.04 LTS, but the DKMS driver should work on any kernel version between 6.6 - 6.8.
+This has been tested on Ubuntu 24.04 LTS, and the DKMS driver should work on kernel versions 6.6-6.8 and 6.11 and later (tested up to 6.14). Note that kernel versions 6.9 and 6.10 are not supported.
+
+> [!NOTE]
+> Ubuntu 24.04 LTS HWE kernel users should be aware that future HWE kernel version changes might include kernel ABI changes that could cause the driver to stop working until an update is released.
 
 For Ubuntu/Debian based systems, download the latest kernel module [dkms package from releases](https://github.com/qvr/nonraid/releases?q=nonraid+dkms), and install it and the prerequisites:
 ```
@@ -27,6 +30,9 @@ sudo update-initramfs -u -k all
 > Updating the initramfs is needed to make sure the new `raid6_pq` module is used, as otherwise the unpatched module gets loaded by other modules depending on it during initramfs, at least on Ubuntu 24.04. Future kernel upgrades should automatically rebuild the DKMS module, and update the initramfs.
 
 Reboot, and load the nonraid driver (`modprobe nonraid super=/nonraid.dat`) and you should have the nonraid driver interface `/proc/nmdcmd` available. You can then use the included `nmdctl` tool for array management, or interact with the driver directly.
+
+> [!TIP]
+> `/nonraid.dat` is the default location for the superblock file used by the `nmdctl` tool. The superblock file is stored outside of the array disks. You can specify a different superblock file location with the `-s` option, as explained in the "Using a custom superblock file location" section below.
 
 ## Array Management
 
@@ -43,7 +49,7 @@ The deb package will also install a [systemd service file](tools/systemd/nonraid
 
 #### Common operations
 
-**Display array status:**
+##### Display array status
 
 Displays the status of the array and individual disks. Displays detected filesystems, mountpoints and filesystem usage. Drive ID's are also displayed if global `--verbose` option is set.
 ```bash
@@ -51,7 +57,7 @@ sudo nmdctl status
 ```
 Exits with an error code if there are any issues with the array, so this can be used as a simple monitoring in a cronjob. (Global `--no-color` option disables `nmdctl` colored ouput, making it more suitable for cron emails.)
 
-**Create a new array (interactive):**
+##### Create a new array (interactive)
 
 This makes assumptions that the disks are already partitioned to have a single partition and their device name matches `/dev/sd*`. You can partition the disk with the command `sudo sgdisk -o -a 8 -n 1:32K:0 /dev/sdX` (this will create a new partition table on the disk, so be careful to use the correct disk).
 ```bash
@@ -65,7 +71,7 @@ Once the array is started, the nmd devices will be available as `/dev/nmdXp1`, w
 >
 > One way to avoid this is to use LUKS encryption on the NonRAID disks, which prevents OS services from detecting the filesystems on raw devices at all.
 
-**Start/stop the array:**
+##### Start/stop the array
 
 Automatically imports all disks to the array.
 ```bash
@@ -74,47 +80,47 @@ sudo nmdctl start/stop
 > [!NOTE]
 > If you are trying to start/import an existing UnRAID array, and you get an warning about size mismatch between detected and configured partition size, do not continue the import, but open an issue with details.
 
-**Import all disks to the array without starting:**
+##### Import all disks to the array without starting
 
 Useful if you want to add a new disk which needs to be done before starting the array.
 ```bash
 sudo nmdctl import
 ```
 
-**Add a new disk (interactive):**
+##### Add a new disk (interactive)
 
 Same assumption about disk partitioning and device naming as with `create`, and the disk must not already be assigned to the array. Only one disk can be added at a time.
 ```bash
 sudo nmdctl add
 ```
 
-**Unassign a disk from a slot:**
+##### Unassign a disk from a slot
 ```bash
 sudo nmdctl unassign SLOT
 ```
 
-**Mount all data disks:**
+##### Mount all data disks
 
 Mounts all detected unmounted filesystems to `MOUNTPREFIX` (default `/mnt/diskN`). ZFS pools are imported with their configured mountpoint. LUKS devices are opened with a key-file (global `--keyfile` option, default `/etc/nonraid/luks-keyfile`). Array needs to be started.
 ```bash
 sudo nmdctl mount [MOUNTPREFIX]
 ```
 
-**Unmount all data disks:**
+##### Unmount all data disks
 
 Unmounts all detected mounted filesystems. LUKS devices are closed after filesystem unmount.
 ```bash
 sudo nmdctl unmount
 ```
 
-**Start/stop a parity check:**
+##### Start/stop a parity check
 
 This will also start reconstruction or clear operations depending on the array state.
 ```bash
 sudo nmdctl check/nocheck
 ```
 
-**Reload the nonraid module:**
+##### Reload the nonraid module
 
 Reloads the driver module with the specified superblock path. This is can be used to recover from error states or when changing superblock files.
 ```bash
@@ -198,7 +204,7 @@ echo "check" > /proc/nmdcmd
 ### Starting existing array after boot
 1. Load the driver with the correct superblock file:
 ```
-modprobe nmd super=/nonraid.dat
+modprobe nonraid super=/nonraid.dat
 ```
 Once the driver is loaded, `/proc/nmdstat` can be used to check which drive ID should go to which slot. (This could be used to automate the imports.)
 
@@ -221,7 +227,7 @@ echo "import 2 sdc1 0 10000000 0 VBOX_HARDDISK_VB9c8a60bc-22209161" > /proc/nmdc
 
 ### Driver bugs / "features"
 As the driver is not intended to be used manually, normally the UnRAID UI makes sure it doesn't do things which cause driver issues, but manually these are easy to run into:
-* Unassigning same slot twice increases disk missing counter twice, causing the array to enter TOO_MANY_MISSING_DISKS state - this requires driver reload to reset: `modprobe -r nmd && modprobe nmd super=/nonraid.dat` or `nmdctl reload`
+* Unassigning same slot twice increases disk missing counter twice, causing the array to enter TOO_MANY_MISSING_DISKS state - this requires driver reload to reset: `modprobe -r nonraid && modprobe nonraid super=/nonraid.dat` or `nmdctl reload`
 * Same goes for many other internal state counters - best practise seems to be to always reload the driver after a single array operation
 
 ## Caveats
@@ -236,13 +242,13 @@ As the driver is not intended to be used manually, normally the UnRAID UI makes 
 - Really, you should probably just get UnRAID
 
 ## Plans
-- Look into adding support for more kernel versions, currently only 6.6 - 6.8 are supported, upstream has patches for 6.12 which should probably work from 6.11+
 - Look into setting up a PPA for the dkms and tools packages, making updates easier
 - ~~Scripts to automate common array management tasks, like importing disks, starting arrays, etc.~~
   - Initial implementation with `nmdctl` is now available
 - ~~Further `nmdctl` improvements, like detecting and mounting filesystems on nmd devices automatically~~
   - `nmdctl` now supports detecting and mounting filesystems, even from inside LUKS devices
 - ~~systemd service definition to handle array start/stop~~
+- **IF** we decide to diverge further from the upstream, the module should be fairly simple to modify to build on multiple kernel versions, so that we dont have to ship multiple versions of the module code for different kernel versions (and we would be able to support 6.9 and 6.10 kernels too) - currently not planned though
 
 ## License
 This project is licensed under the GNU General Public License v2.0 (GPL-2.0) - the same license as the Linux kernel, and the `md_unraid` driver itself. See [LICENSE](LICENSE) for the full license text.

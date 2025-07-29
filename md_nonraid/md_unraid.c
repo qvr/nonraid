@@ -39,7 +39,7 @@
 #include <linux/seq_file.h>
 #include <linux/sched/signal.h>
 
-#define MAJOR_NR MD_MAJOR
+#define MAJOR_NR 127
 #define MD_DRIVER
 
 /* MD_TRACE level
@@ -534,7 +534,7 @@ static mddev_t *mddev_map[1];
 
 static inline mddev_t *dev_to_mddev(dev_t dev)
 {
-	BUG_ON((MAJOR(dev) != MD_MAJOR) || (MINOR(dev) >= MD_SB_DISKS));
+	BUG_ON((MAJOR(dev) != MAJOR_NR) || (MINOR(dev) >= MD_SB_DISKS));
 	BUG_ON(mddev_map[0] == NULL);
 
 	return mddev_map[0];
@@ -1028,7 +1028,7 @@ static int do_run(mddev_t *mddev)
 			gd->major = MAJOR(mddev->dev);
 			gd->first_minor = unit;
                         gd->minors = 1;
-			sprintf(gd->disk_name, "md%dp1", unit);
+			sprintf(gd->disk_name, "nmd%dp1", unit);
 			gd->fops = &md_fops;
 			gd->private_data = mddev;
 			gd->queue->queuedata = mddev;
@@ -1049,7 +1049,7 @@ static int do_run(mddev_t *mddev)
                                 gd->queue->limits.max_hw_sectors = 256;  /* 256 sectors => 128K */
                         
 			ret = add_disk(gd);
-			printk("md%dp1: running, size: %llu blocks\n", unit, disk->size);
+			printk("nmd%dp1: running, size: %llu blocks\n", unit, disk->size);
 		}
 	}
 	
@@ -1067,7 +1067,7 @@ static int do_stop(mddev_t *mddev)
                 int unit = disk->number;
 
                 if (mddev->gendisk[unit]) {
-			printk("md%dp1: stopping\n", unit);
+			printk("nmd%dp1: stopping\n", unit);
 
 			del_gendisk(mddev->gendisk[unit]);
 			put_disk(mddev->gendisk[unit]);
@@ -1816,7 +1816,7 @@ static void status_disk(struct seq_file *seq, mdp_disk_t *disk, mdk_rdev_t *rdev
 
         seq_printf(seq, "diskNumber.%d=%d\n", number, number);
 	if ((disk_active(disk) || disk_enabled(disk)) && !is_parity_idx(number))
-		seq_printf(seq, "diskName.%d=md%dp1\n", number, number);
+		seq_printf(seq, "diskName.%d=nmd%dp1\n", number, number);
 	else
 		seq_printf(seq, "diskName.%d=\n", number);
 	seq_printf(seq, "diskSize.%d=%llu\n", number, disk->size);
@@ -1921,7 +1921,7 @@ static ssize_t md_proc_write(struct file *file, const char *buffer,
 	cmd_seq++;
 	
 	if (md_trace)
-		printk("mdcmd (%d): %s %s\n", cmd_seq, token, bufp);
+		printk("nmdcmd (%d): %s %s\n", cmd_seq, token, bufp);
 	
 	if (!strcmp("set", token)) {
 		char *name = "";
@@ -2190,8 +2190,8 @@ static int __init md_init(void)
 	       MD_MAJOR_VERSION, MD_MINOR_VERSION,
 	       MD_PATCHLEVEL_VERSION);
 
-	if (register_blkdev(MAJOR_NR, "md")) {
-		printk("md: unable to get major %d for md\n", MAJOR_NR);
+	if (register_blkdev(MAJOR_NR, "nmd")) {
+		printk("nmd: unable to get major %d for md\n", MAJOR_NR);
 		return (-1);
 	}
 
@@ -2201,19 +2201,19 @@ static int __init md_init(void)
 	}
 
 	register_reboot_notifier(&md_notifier);
-        proc_create("mdcmd", S_IRUGO|S_IWUSR, NULL, &md_proc_cmd_fops);
-        proc_create("mdstat", S_IRUGO|S_IWUSR, NULL, &md_proc_stat_fops);
+        proc_create("nmdcmd", S_IRUGO|S_IWUSR, NULL, &md_proc_cmd_fops);
+        proc_create("nmdstat", S_IRUGO|S_IWUSR, NULL, &md_proc_stat_fops);
 	return (alloc_mddev(array_dev) ? 0 : -1);
 }
 
 static __exit void md_exit(void)
 {
 	free_mddev(dev_to_mddev(MKDEV(MAJOR_NR,0)));
-	remove_proc_entry("mdcmd", NULL);
-	remove_proc_entry("mdstat", NULL);
+	remove_proc_entry("nmdcmd", NULL);
+	remove_proc_entry("nmdstat", NULL);
 	unregister_reboot_notifier(&md_notifier);
 	destroy_workqueue(md_wq);
-	unregister_blkdev(MAJOR_NR, "md");
+	unregister_blkdev(MAJOR_NR, "nmd");
 
 	printk("md: unRAID driver removed\n");
 }
@@ -2223,6 +2223,6 @@ module_exit(md_exit);
 		
 /****************************************************************************/
 
-MODULE_ALIAS("md");
-MODULE_ALIAS_BLOCKDEV_MAJOR(MD_MAJOR);
+MODULE_ALIAS("nonraid");
+MODULE_ALIAS_BLOCKDEV_MAJOR(MAJOR_NR);
 MODULE_LICENSE("GPL");

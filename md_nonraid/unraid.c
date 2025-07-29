@@ -21,7 +21,7 @@
  * Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include "md_private.h"
+#include "md_unraid.h"
 
 /*
  * The following can be used to debug the driver

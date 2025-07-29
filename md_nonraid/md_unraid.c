@@ -35,7 +35,7 @@
    (for example /usr/src/linux/COPYING); if not, write to the Free
    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
-#include "md_private.h"
+#include "md_unraid.h"
 #include <linux/seq_file.h>
 #include <linux/sched/signal.h>
 

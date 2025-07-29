@@ -1285,7 +1285,7 @@ start_array() {
 
         case "$mdstate" in
             "NEW_ARRAY")
-                echo -e "${YELLOW}This is a NEW_ARRAY and will require parity construction.${NC}"
+                echo -e "${YELLOW}This is a new array being started for the first time.${NC}"
                 ;;
             "RECON_DISK")
                 echo -e "${YELLOW}One or more disks need reconstruction.${NC}"

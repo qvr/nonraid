@@ -2404,19 +2404,18 @@ mount_array_disks() {
         fi
 
         if [ "$fs_type" = "luks" ]; then
-            if [ -z "$LUKS_KEYFILE" ] || [ ! -f "$LUKS_KEYFILE" ]; then
-                echo -e "${RED}Error: LUKS device detected in slot $slot (${diskname}) but keyfile '${LUKS_KEYFILE}' does not exist. Cannot open LUKS device.${NC}"
-                error_count=$((error_count + 1))
-                continue
-            fi
             # Open LUKS device
             echo -n "Slot $slot (${diskname}): Opening LUKS device... "
-            if cryptsetup luksOpen --key-file "$LUKS_KEYFILE" "$device" "$diskname" >/dev/null 2>&1; then
+            if [ -z "$LUKS_KEYFILE" ] || [ ! -f "$LUKS_KEYFILE" ]; then
+                echo -e "${RED}FAILED${NC}: ${YELLOW}Keyfile '${LUKS_KEYFILE}' does not exist. Cannot open LUKS device.${NC}"
+                error_count=$((error_count + 1))
+                continue
+            elif cryptsetup luksOpen --key-file "$LUKS_KEYFILE" "$device" "$diskname" >/dev/null 2>&1; then
                 echo -e "${GREEN}SUCCESS${NC}"
                 # redetect layered filesystem type after opening LUKS
                 fs_type="$(get_fs_type "$device")"
             else
-                echo -e "${RED}FAILED${NC}"
+                echo -e "${RED}FAILED${NC}: ${YELLOW}Wrong passphrase or keyfile for LUKS device?${NC}"
                 error_count=$((error_count + 1))
                 continue
             fi

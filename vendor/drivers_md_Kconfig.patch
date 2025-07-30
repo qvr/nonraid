@@ -1,0 +1,26 @@
+--- a/drivers/md/Kconfig
++++ b/drivers/md/Kconfig
+@@ -195,6 +195,23 @@
+ 
+ 	If unsure, say N.
+ 
++config MD_UNRAID
++	bool "unRAID support"
++	depends on MD
++	depends on BLK_DEV_MD
++	depends on !MD_AUTODETECT
++	depends on !MD_LINEAR
++	depends on !MD_RAID0
++	depends on !MD_RAID1
++	depends on !MD_RAID10
++	depends on !MD_RAID456
++	depends on !MD_MULTIPATH
++	depends on !MD_FAULTY
++	depends on !MD_CLUSTER
++	select XOR_BLOCKS
++	help
++	  Lime Technology unRAID driver.
++
+ source "drivers/md/bcache/Kconfig"
+ 
+ config BLK_DEV_DM_BUILTIN

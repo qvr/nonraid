@@ -1,0 +1,91 @@
+--- a/lib/raid6/algos.c	2022-05-30 00:24:09.000000000 -0700
++++ b/lib/raid6/algos.c	2022-06-05 08:15:19.255545312 -0700
+@@ -28,6 +28,12 @@
+ struct raid6_calls raid6_call;
+ EXPORT_SYMBOL_GPL(raid6_call);
+ 
++void (*raid6_gen_syndrome)(int, size_t, void **);
++EXPORT_SYMBOL_GPL(raid6_gen_syndrome);
++
++void (*raid6_xor_syndrome)(int, int, int, size_t, void **);
++EXPORT_SYMBOL_GPL(raid6_xor_syndrome);
++
+ const struct raid6_calls * const raid6_algos[] = {
+ #if defined(__i386__) && !defined(__arch_um__)
+ #ifdef CONFIG_AS_AVX512
+@@ -225,6 +231,63 @@
+ 	return best;
+ }
+ 
++static inline const struct raid6_calls *raid6_choose_xor(
++	void *(*const dptrs)[RAID6_TEST_DISKS], const int disks)
++{
++	unsigned long perf, bestxorperf, j0, j1;
++	int start = (disks>>1)-1, stop = disks-3;	/* work on the second half of the disks */
++	const struct raid6_calls *const *algo;
++	const struct raid6_calls *best;
++
++	for (bestxorperf = 0, best = NULL, algo = raid6_algos; *algo; algo++) {
++		if (!best || (*algo)->priority >= best->priority) {
++			if ((*algo)->valid && !(*algo)->valid())
++				continue;
++
++			if (!(*algo)->xor_syndrome)
++				continue;
++
++			if (!IS_ENABLED(CONFIG_RAID6_PQ_BENCHMARK)) {
++				best = *algo;
++				break;
++			}
++
++			perf = 0;
++
++			preempt_disable();
++			j0 = jiffies;
++			while ((j1 = jiffies) == j0)
++				cpu_relax();
++			while (time_before(jiffies,
++					    j1 + (1<<RAID6_TIME_JIFFIES_LG2))) {
++				(*algo)->xor_syndrome(disks, start, stop, PAGE_SIZE, *dptrs);
++				perf++;
++			}
++			preempt_enable();
++
++			if (perf > bestxorperf) {
++				bestxorperf = perf;
++				best = *algo;
++			}
++			pr_info("raid6: %-8s xor() %5ld MB/s\n", (*algo)->name,
++				(perf * HZ * (disks-2)) >>
++				(20 - PAGE_SHIFT + RAID6_TIME_JIFFIES_LG2));
++		}
++	}
++
++	if (!best) {
++		pr_err("raid6: Yikes! No algorithm found!\n");
++		goto out;
++	}
++
++	pr_info("raid6: using algorithm %s xor() %ld MB/s\n",
++		best->name,
++		(bestxorperf * HZ * (disks - 2)) >>
++		(20 - PAGE_SHIFT + RAID6_TIME_JIFFIES_LG2));
++
++out:
++	return best;
++}
+ 
+ /* Try to pick the best algorithm */
+ /* This code uses the gfmul table as convenient data set to abuse */
+@@ -261,6 +324,11 @@
+ 
+ 	/* select raid gen_syndrome function */
+ 	gen_best = raid6_choose_gen(&dptrs, disks);
++	raid6_gen_syndrome = gen_best->gen_syndrome;
++	if (!gen_best->xor_syndrome) {
++		gen_best = raid6_choose_xor(&dptrs, disks);
++	}
++	raid6_xor_syndrome = gen_best->xor_syndrome;
+ 
+ 	/* select raid recover functions */
+ 	rec_best = raid6_choose_recov();

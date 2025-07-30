@@ -36,7 +36,7 @@ declare -A NMDSTAT_VALUES
 
 # Display usage information
 usage() {
-    echo "nmdctl - NonRAID array management utility"
+    echo "nmdctl - NonRAID array management utility (v$VERSION)"
     echo ""
     echo "Usage: nmdctl [GLOBAL OPTIONS] COMMAND [COMMAND OPTIONS]"
     echo ""

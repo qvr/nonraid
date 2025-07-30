@@ -1,0 +1,1 @@
+These files are copied from [nonraid-6.6 branch](https://github.com/qvr/nonraid/tree/nonraid-6.6) that is used to track upstream changes and rebase nonraid patches on top of them. Check that branch for commit history.

@@ -253,6 +253,11 @@ check_driver_inconsistent_state() {
         get_all_nmdstat_values NMDSTAT_VALUES
     fi
 
+    # We check for driver states only if the array is started
+    if [ "${NMDSTAT_VALUES[mdState]}" != "STARTED" ]; then
+        return 1
+    fi
+
     # Get the mdnum* counter values
     local mdnummissing="${NMDSTAT_VALUES[mdNumMissing]:-0}"
     local mdnuminvalid="${NMDSTAT_VALUES[mdNumInvalid]:-0}"

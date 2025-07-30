@@ -65,7 +65,7 @@ extern void (*raid6_xor_syndrome)(int, int, int, size_t, void **);
  */
 #define MD_MAJOR_VERSION                2
 #define MD_MINOR_VERSION                9
-#define MD_PATCHLEVEL_VERSION           28
+#define MD_PATCHLEVEL_VERSION           33
 
 /****************************************************************************/
 /* 'md_p.h' holds the 'physical' layout of RAID devices */
@@ -217,6 +217,7 @@ typedef struct mdp_superblock_v1_s {
 /* 'md_k.h' holds kernel internal definitions  */
 
 typedef struct mdk_rdev_s {
+        struct bdev_handle      *bdev_handle;             /* handle from open for bdev */
 	struct block_device     *bdev;	                  /* block device handle */
 
 	char *status;                                     /* disk status */

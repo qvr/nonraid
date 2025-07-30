@@ -35,7 +35,7 @@
    (for example /usr/src/linux/COPYING); if not, write to the Free
    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
-#include "md_private.h"
+#include "md_unraid.h"
 #include <linux/seq_file.h>
 #include <linux/sched/signal.h>
 
@@ -187,7 +187,7 @@ static inline unsigned long get_seconds(void)
 /* Open the indicated file and read size bytes into the buffer; then close the file.
  * Returns count of bytes read, which should equal size, upon success.
  */
-int read_file(char *filename, void *buffer, int size)
+static int read_file(char *filename, void *buffer, int size)
 {
 	int retval = 0;
 
@@ -211,7 +211,7 @@ int read_file(char *filename, void *buffer, int size)
 /* Open the indicated file and write size bytes from the buffer; then close the file.
  * Returns count of bytes written, which should equal size, upon success.
  */
-int write_file(char *filename, void *buffer, int size)
+static int write_file(char *filename, void *buffer, int size)
 {
 	int retval = 0;
 
@@ -265,7 +265,7 @@ static unsigned int calc_sb_csum(mdp_super_t * sb)
  */
 
 /* remove all embedded spaces, replacing with single underscore */
-char *strcat_sb_old_id(char *tar, char *src, int len)
+static char *strcat_sb_old_id(char *tar, char *src, int len)
 {
 	int space = 0;
 	int i;
@@ -407,27 +407,28 @@ static char DISK_NP_DSBL[] =    "DISK_NP_DSBL";           /* disabled, no disk p
 static char DISK_DSBL_NEW[] =   "DISK_DSBL_NEW";          /* disabled, new disk present */
 static char DISK_NEW[] =        "DISK_NEW";               /* new disk */
 
-static int lock_bdev(char *name, struct block_device **bdevP)
+static int lock_bdev(char *name, mdk_rdev_t *rdev)
 {
         char path[BDEVNAME_SIZE+6];
-	struct block_device *bdev;
 	
         snprintf(path, sizeof(path), "/dev/%s", name);
         
-	bdev = blkdev_get_by_path(path, FMODE_READ|FMODE_WRITE, NULL);
-	if (IS_ERR(bdev)) {
-                *bdevP = NULL;
-		return PTR_ERR(bdev);
+	rdev->bdev_handle = bdev_open_by_path(path, FMODE_READ|FMODE_WRITE, NULL, NULL);
+	if (IS_ERR(rdev->bdev_handle)) {
+                int err = PTR_ERR(rdev->bdev_handle);
+                return err;
         }
 	
-	*bdevP = bdev;
+	rdev->bdev = rdev->bdev_handle->bdev;
 	return 0;
 }
 
-static void unlock_bdev(struct block_device *bdev)
+static void unlock_bdev(mdk_rdev_t *rdev)
 {
-	if (bdev)
-		blkdev_put(bdev, FMODE_READ|FMODE_WRITE);
+	if (rdev->bdev) {
+		bdev_release(rdev->bdev_handle);
+                rdev->bdev = NULL;
+        }
 }
 
 /* Import a device.
@@ -436,7 +437,6 @@ static int import_device(mdk_rdev_t *rdev, char *name,
                          unsigned long offset, unsigned long long size,
                          int erased, char *id, mddev_t *mddev, int unit)
 {
-	struct block_device *bdev;
 	int err = 0;
 	
 	memset(rdev, 0, sizeof(mdk_rdev_t));
@@ -449,7 +449,7 @@ static int import_device(mdk_rdev_t *rdev, char *name,
 	}
 
 	/* open the disk device */
-	err = lock_bdev(name, &bdev);
+	err = lock_bdev(name, rdev);
 	if (err) {
 		printk("md: import disk%d: lock_bdev error: %d\n", unit, err);
 		return err; /* device probably not present */
@@ -471,7 +471,7 @@ static int import_device(mdk_rdev_t *rdev, char *name,
 	printk("md: import disk%d: (%s) %s size: %llu %s\n",
 	       unit, rdev->name, rdev->id, rdev->size, erased ? "erased" : "");
 
-	unlock_bdev(bdev);
+	unlock_bdev(rdev);
 	return err;
 }
 
@@ -540,14 +540,14 @@ static inline mddev_t *dev_to_mddev(dev_t dev)
 	return mddev_map[0];
 }
 
-void add_mddev_mapping(mddev_t *mddev)
+static void add_mddev_mapping(mddev_t *mddev)
 {
 	BUG_ON(mddev_map[0] != NULL);
 
 	mddev_map[0] = mddev;
 }
 
-void del_mddev_mapping(mddev_t *mddev)
+static void del_mddev_mapping(mddev_t *mddev)
 {
 	BUG_ON(mddev_map[0] != mddev);
 
@@ -613,7 +613,7 @@ static mddev_t *alloc_mddev(dev_t dev)
         sb->num_disks = 2;
 
 	/* initialize */
-	mddev->state = NO_DATA_DISKS;
+	mddev->state = STOPPED;
         mddev->num_disks = 0;
 	mddev->num_disabled = 0;
 	mddev->num_replaced = 0;
@@ -789,11 +789,11 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 
 	/*** now establish array state ***/
 
-	/* assume we're just stopped */
-	mddev->state = STOPPED;
+        /* assume we're just stopped */
+        mddev->state = STOPPED;
 
-        /* verify at least one data disk assigned */
-        if (sb->num_disks == 2) {
+        /* maybe parity assigned but no data disks */
+        if (mddev->num_disks & (sb->num_disks == 2)) {
                 mddev->state = NO_DATA_DISKS;
         }
         else
@@ -880,7 +880,7 @@ int md_write_error(mddev_t *mddev, int disk_number, sector_t sector)
         printk("md: disk%d write error, sector=%llu\n", disk_number, (unsigned long long)sector);
         rdev->errors++;
 
-        if (disk_active(disk)) {
+	if (disk_active(disk)) {
                 /* an active array disk failed */
                 if (disk_enabled(disk) && (mddev->num_disabled < 2)) {
                         /* if a replacement disk that failed */
@@ -946,10 +946,9 @@ static void md_submit_bio(struct bio *bi)
         unraid_make_request(mddev, unit, bi);
 }
 
-static int md_open(struct block_device *bdev, fmode_t mode)
-
+static int md_open(struct gendisk *gd, fmode_t mode)
 {
-	mddev_t *mddev = bdev->bd_disk->private_data;
+	mddev_t *mddev = gd->private_data;
 
 	if (!mddev) {
 		printk("md_open: no mddev\n");
@@ -961,7 +960,7 @@ static int md_open(struct block_device *bdev, fmode_t mode)
 	return 0;
 }
 
-static void md_release(struct gendisk *gd, fmode_t mode)
+static void md_release(struct gendisk *gd)
 {
 	mddev_t *mddev = gd->private_data;
 
@@ -997,7 +996,7 @@ static int do_run(mddev_t *mddev)
 
 		/* only lock present devices */
                 if (!strstr(rdev->status, "DISK_NP")) {
-			err = lock_bdev(rdev->name, &rdev->bdev);
+			err = lock_bdev(rdev->name, rdev);
 			if (err) {
 				printk("md: do_run: lock_bdev error: %d\n", err);
 				return err; /* partition not present */
@@ -1082,8 +1081,7 @@ static int do_stop(mddev_t *mddev)
 	for (i = 0; i < MD_SB_DISKS; i++) {
 		mdk_rdev_t *rdev = &mddev->rdev[i];
 
-		unlock_bdev(rdev->bdev);
-                rdev->bdev = NULL;
+		unlock_bdev(rdev);
 	}
 
 	return 0;
@@ -1121,7 +1119,7 @@ void md_sync_done(mddev_t *mddev, sector_t sector, int count)
 #define SYNC_MARKS	10
 #define	SYNC_MARK_STEP	(3*HZ)
 
-int md_do_sync(mddev_t *mddev)
+static int md_do_sync(mddev_t *mddev)
 {
 	unsigned long start_time, last_mark;
 	unsigned long mark[SYNC_MARKS];
@@ -1479,10 +1477,12 @@ static int start_array(dev_t array_dev, char *state)
         }
 
 	/* gitty up */
-	err = do_run(mddev);
-	if (err) {
-		do_stop(mddev);
-		return err;
+        if (sb->num_disks > 2) {
+                err = do_run(mddev);
+                if (err) {
+                        do_stop(mddev);
+                        return err;
+                }
 	}
 
 	mddev->state = STARTED;
@@ -1503,11 +1503,6 @@ static int stop_array(dev_t array_dev, int notifier)
 	mddev_t *mddev = dev_to_mddev(array_dev);
 	int active;
 
-	if (!mddev->private) {
-		printk("md: stop_array: not started\n");
-		return -EINVAL;
-	}
-
 	/* check if still in use */
 	active = atomic_read(&mddev->active);
 	if (active) {
@@ -1521,7 +1516,9 @@ static int stop_array(dev_t array_dev, int notifier)
 	mutex_unlock(&mddev->recovery_sem);
         mddev->curr_resync = 0;
 
-	do_stop(mddev);
+	if (mddev->private) {
+                do_stop(mddev);
+        }
 	mddev->state = STOPPED;
 
 	return 0;
@@ -1536,10 +1533,15 @@ static int stop_array(dev_t array_dev, int notifier)
 static int check_array(dev_t array_dev, char *option, unsigned long long offset)
 {
 	mddev_t *mddev = dev_to_mddev(array_dev);
+	mdp_super_t *sb = &mddev->sb;
         int recovery_option, recovery_resume;
 
 	if (!mddev->private) {
 		printk("md: check_array: not started\n");
+		return -EINVAL;
+	}
+	if (sb->num_disks <= 2) {
+		printk("md: check_array: no devices\n");
 		return -EINVAL;
 	}
 
@@ -1736,7 +1738,8 @@ static void status_resync(mddev_t *mddev)
                         }
                 }
         }
-        else {
+        else
+        if (sb->num_disks > 2) {
                 /* read all data disks and check P and/or Q if present */
                 /* note: if it's a single disabled data disk we are really just checking Q
                  * because check_parity() will generate D from P and then check Q.
@@ -1856,7 +1859,7 @@ static int md_status(struct seq_file *seq, dev_t array_dev)
  */
 
 /* Caution: modifies the input buffer. */
-char *get_token(char **bufp, char *delim) {
+static char *get_token(char **bufp, char *delim) {
 	char *ptr = *bufp;
 	char *token;
 	
@@ -2142,7 +2145,7 @@ static int md_seq_open(struct inode *inode, struct file *file)
 	return single_open(file, md_seq_show, NULL);
 }
 
-int md_seq_release(struct inode *inode, struct file *file)
+static int md_seq_release(struct inode *inode, struct file *file)
 {
         return single_release(inode, file);
 }

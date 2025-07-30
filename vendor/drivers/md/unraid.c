@@ -21,7 +21,7 @@
  * Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
-#include "md_private.h"
+#include "md_unraid.h"
 
 /*
  * The following can be used to debug the driver
@@ -779,7 +779,7 @@ static void copy_write_data(struct stripe_head *sh)
         }
 }
 
-void rmw5_write_data(struct stripe_head *sh)
+static void rmw5_write_data(struct stripe_head *sh)
 {
 	int disks=sh->conf->disks, pd_idx=disks-2, count, i;
 	void *dest, *ptr[MAX_XOR_BLOCKS];

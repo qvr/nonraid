@@ -6,7 +6,7 @@ NonRAID is a fork of the unRAID system's open-source `md_unraid` kernel driver f
 
 Unlike in UnRAID, where the driver replaces the kernel's standard `md` driver, the NonRAID driver has been separated into it's own kernel module (`md_nonraid`). This allows it to be easily added as a DKMS module on Ubuntu and Debian based systems, without needing to patch the kernel or replace the standard `md` driver. We do however replace the standard `raid6_pq` module with our patched version, as the upstream driver depends on those patches for the parity calculations.
 
-While this is a fork, we try to keep the changes to driver minimal to make syncs with upstream easier. The driver currently has patches to rebrand and separate the module from `md`, and a single patch to prevent kernel crashes if starting the array without importing all disks first.
+While this is a fork, we try to keep the changes to driver minimal to make syncs with upstream easier. The driver currently has patches to rebrand and separate the module from `md`, and a couple of patches to prevent kernel crashes if starting the array without importing all disks first or importing in the "wrong" order.
 
 > [!WARNING]
 > :radioactive: This is an experimental project, the driver has not really been tested outside of virtualized dev environment and data loss is a possibility.
@@ -241,6 +241,7 @@ echo "import 2 sdc1 0 10000000 0 VBOX_HARDDISK_VB9c8a60bc-22209161" > /proc/nmdc
 As the driver is not intended to be used manually, normally the UnRAID UI makes sure it doesn't do things which cause driver issues, but manually these are easy to run into:
 * Unassigning same slot twice increases disk missing counter twice, causing the array to enter TOO_MANY_MISSING_DISKS state - this requires driver reload to reset: `modprobe -r nonraid && modprobe nonraid super=/nonraid.dat` or `nmdctl reload`
 * Same goes for many other internal state counters - best practise seems to be to always reload the driver after a single array operation
+* `nmdctl` tries to handle these driver issues either automatically or by warning the user to reload the driver if an inconsistent state is detected
 
 ## Caveats
 - This is just a forked open-source `md_unraid` driver for those who are interested in DIY - it simply handles the array and parity. You have to manually handle importing disks directly via the driver management interface, starting with the correct parameters, doing necessary reconstructions/checks, monitoring the array state from /proc/nmdstat etc.

@@ -1070,6 +1070,7 @@ find_matching_disk() {
 
 # Import disks to array without starting it
 import_disks() {
+    local quiet_mode="${1:-0}"
     check_root
 
     # Check if module is loaded, will attempt to load if superblock provided
@@ -1209,7 +1210,9 @@ import_disks() {
 
     echo ""
     # Show array status after importing
-    show_status
+    if [ "$quiet_mode" -eq 0 ]; then
+        show_status
+    fi
 
     return 0
 }
@@ -2072,6 +2075,17 @@ add_disk() {
     echo ""
     echo -e "Adding disk to array..."
 
+    local reload_done=0
+    # If this is a disk replacement, and any slots are currently imported, we need to reload driver before adding the disk
+    if [ "$imported_disks" -gt 0 ] && [ "${NMDSTAT_VALUES[diskSize.$selected_slot]}" -gt 0 ]; then
+        echo -e "${YELLOW}Disk replacement, reloading the nonraid module first...${NC}"
+        if ! reload_module 1; then
+            echo -e "${RED}Error: Failed to reload nonraid module${NC}"
+            return 1
+        fi
+        reload_done=1
+    fi
+
     # Get disk ID (use device path if no ID)
     local id_to_use="${selected_disk_id:-$(basename "$selected_dev")}"
 
@@ -2083,6 +2097,11 @@ add_disk() {
 
     echo -e "${GREEN}Successfully added disk to slot $selected_slot${NC}"
     echo ""
+
+    if [ $reload_done -eq 1 ]; then
+        echo -e "${YELLOW}Module was reloaded, importing back rest of the disks.${NC}"
+        import_disks 1
+    fi
 
     # Show array status
     show_status
@@ -2147,20 +2166,25 @@ unassign_disk() {
         return 1
     fi
 
+    # Get all nmdstat values if we haven't already
+    if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
+        get_all_nmdstat_values NMDSTAT_VALUES
+    fi
+
     # Check if array is stopped
-    local mdstate=$(get_nmdstat_value "mdState")
-    if [ "$mdstate" = "STARTED" ]; then
+    local mdstate="${NMDSTAT_VALUES[mdState]}"
+    if [ "$mdstate" != "STOPPED" ]; then
         echo -e "${RED}Error: Array must be stopped before unassigning disks${NC}"
         echo -e "Stop the array with: ${YELLOW}nmdctl stop${NC}"
         return 1
     fi
 
     # Get disk information for the slot
-    local disk_id=$(get_nmdstat_value "diskId.$slot")
-    local rdev_name=$(get_nmdstat_value "rdevName.$slot")
-    local rdev_status=$(get_nmdstat_value "rdevStatus.$slot")
-    local disk_size=$(get_nmdstat_value "diskSize.$slot")
-    local rdev_size=$(get_nmdstat_value "rdevSize.$slot")
+    local disk_id="${NMDSTAT_VALUES[diskId.$slot]}"
+    local rdev_name="${NMDSTAT_VALUES[rdevName.$slot]}"
+    local rdev_status="${NMDSTAT_VALUES[rdevStatus.$slot]}"
+    local disk_size="${NMDSTAT_VALUES[diskSize.$slot]}"
+    local rdev_size="${NMDSTAT_VALUES[rdevSize.$slot]}"
     local size_gb=0
 
     # Calculate size in GB if available
@@ -2222,6 +2246,21 @@ unassign_disk() {
 
     echo -e "Unassigning disk from slot $slot_display..."
 
+    local reload_done=0
+    # If any slots are currently imported, we need to reload driver before unassigning
+    for check_slot in $(get_defined_slots); do
+        local check_rdev_name="${NMDSTAT_VALUES[rdevName.$check_slot]}"
+        if [ -n "$check_rdev_name" ] && [ "$check_rdev_name" != "none" ]; then
+            echo -e "${YELLOW}Slot(s) already imported, reloading nonraid module first to unassign disk...${NC}"
+            if ! reload_module 1; then
+                echo -e "${RED}Error: Failed to reload nonraid module${NC}"
+                return 1
+            fi
+            reload_done=1
+            break
+        fi
+    done
+
     # Unassign the disk by importing an empty device
     if ! run_nmd_command "import $slot '' 0 0 0 ''"; then
         echo -e "${RED}Error: Failed to unassign disk from slot $slot${NC}"
@@ -2230,6 +2269,11 @@ unassign_disk() {
 
     echo -e "${GREEN}Successfully unassigned disk from slot $slot_display${NC}"
     echo ""
+
+    if [ "$reload_done" -eq 1 ]; then
+        echo -e "${YELLOW}Module reload was done, importing back rest of the disks.${NC}"
+        import_disks 1
+    fi
 
     # Show array status
     show_status

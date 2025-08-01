@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.2.0
+VERSION=1.3.0
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -46,7 +46,8 @@ usage() {
     echo "  start                       Start the array"
     echo "  stop                        Stop the array"
     echo "  import                      Import all disks to the array without starting it"
-    echo "  add                         Add a new disk to the array interactively"
+    echo "  add                         Add a new disk to the array"
+    echo "  replace SLOT                Replace a disk in the specified slot"
     echo "  unassign SLOT               Unassign a disk from the specified slot"
     echo "  reload                      Reload nonraid module with specified superblock"
     echo "  check [OPTION]              Start parity check (CORRECT (default), NOCORRECT or RESUME)"
@@ -1788,6 +1789,7 @@ create_array() {
 
 # Add a new disk to the array
 add_disk() {
+    local replace_slot="${1}"
     check_root
 
     # Check if module is loaded, will attempt to load if superblock provided
@@ -1830,7 +1832,7 @@ add_disk() {
         fi
     done
 
-    if [ "$imported_disks" -lt "$total_slots" ]; then
+    if [ -z "$replace_slot" ] && [ "$imported_disks" -lt "$total_slots" ]; then
         echo -e "${YELLOW}Warning: Not all disks have been imported ($imported_disks/$total_slots)${NC}"
         echo -e "${YELLOW}It's recommended to import all existing disks before adding a new one${NC}"
         read -rp "Continue anyway? (y/N): " confirm
@@ -1849,7 +1851,30 @@ add_disk() {
         return 1
     fi
 
-    echo -e "=== ${BLUE}Add New Disk to Array${NC} ==="
+    if [ -n "$replace_slot" ]; then
+        # Handle P/Q notation
+        case "$replace_slot" in
+            [Pp])
+                replace_slot="0"
+                ;;
+            [Qq])
+                replace_slot="29"
+                ;;
+        esac
+        if [ "${NMDSTAT_VALUES[diskSize.$replace_slot]}" -gt 0 ]; then
+            if [ -z "${NMDSTAT_VALUES[diskId.$replace_slot]}" ]; then
+                echo -e "=== ${BLUE}Replacing disk in slot $replace_slot${NC} ==="
+            else
+                echo -e "${RED}Error: Unassign slot first with ${GREEN}nmdctl unassign $replace_slot${NC}"
+                return 1
+            fi
+        else
+            echo -e "${RED}Error: Empty slot, add new disk with ${GREEN}nmdctl add${NC}"
+            return 1
+        fi
+    else
+        echo -e "=== ${BLUE}Add New Disk to Array${NC} ==="
+    fi
     echo ""
     echo -e "${YELLOW}This will add a single new disk to the array.${NC}"
     echo -e "${YELLOW}After adding the disk, you must start the array to process it.${NC}"
@@ -1926,45 +1951,45 @@ add_disk() {
     fi
     echo ""
 
-    # Find available slots
-    local available_slots=()
-    local replaceable_slots=()
-
-    # Then, determine which slots are available
-    for slot in $(seq 0 29); do
-        if [ -z "${NMDSTAT_VALUES[rdevId.$slot]}" ] && [ -z "${NMDSTAT_VALUES[diskId.$slot]}" ]; then
-            available_slots+=("$slot")
-            if [ "${NMDSTAT_VALUES[diskSize.$slot]}" -gt 0 ]; then
-                replaceable_slots+=("$slot")
+    if [ -z "$replace_slot" ]; then
+        # Find available slots
+        local available_slots=()
+        local replaceable_slots=()
+        for slot in $(seq 0 29); do
+            if [ -z "${NMDSTAT_VALUES[rdevId.$slot]}" ] && [ -z "${NMDSTAT_VALUES[diskId.$slot]}" ]; then
+                available_slots+=("$slot")
+                if [ "${NMDSTAT_VALUES[diskSize.$slot]}" -gt 0 ]; then
+                    replaceable_slots+=("$slot")
+                fi
             fi
+        done
+
+        # Priority suggestion list: any missing disks, then parity disks
+        if [ ${#replaceable_slots[@]} -gt 0 ]; then
+            echo -e "${YELLOW}You should replace unassigned disk in slots: ${GREEN}${replaceable_slots[*]}${NC}"
+        elif [ -z "${NMDSTAT_VALUES[rdevId.0]}" ]; then
+            echo -e "${YELLOW}No parity disk found. Consider adding a parity disk (slot 0).${NC}"
+        elif [ -z "${NMDSTAT_VALUES[rdevId.29]}" ]; then
+            echo -e "${YELLOW}No second parity disk found. You may add one (slot 29) for dual parity.${NC}"
         fi
-    done
 
-    # Priority suggestion list: any missing disks, then parity disks
-    if [ ${#replaceable_slots[@]} -gt 0 ]; then
-        echo -e "${YELLOW}You should replace unassigned disk in slots: ${GREEN}${replaceable_slots[*]}${NC}"
-    elif [ -z "${NMDSTAT_VALUES[rdevId.0]}" ]; then
-        echo -e "${YELLOW}No parity disk found. Consider adding a parity disk (slot 0).${NC}"
-    elif [ -z "${NMDSTAT_VALUES[rdevId.29]}" ]; then
-        echo -e "${YELLOW}No second parity disk found. You may add one (slot 29) for dual parity.${NC}"
+        # Check if we have any available slots
+        if [ ${#available_slots[@]} -eq 0 ]; then
+            echo -e "${RED}Error: No available slots in the array${NC}"
+            echo -e "${YELLOW}All possible slots are already assigned.${NC}"
+            return 1
+        fi
+
+        echo -e "Available slots: ${GREEN}${available_slots[*]}${NC}"
+        echo ""
+
+        # Display information about slot types
+        echo -e "${BLUE}Slot Types:${NC}"
+        echo -e " - Slot 0: Primary parity disk"
+        echo -e " - Slot 29: Secondary parity disk (for dual parity)"
+        echo -e " - Slots 1-28: Data disks"
+        echo ""
     fi
-
-    # Check if we have any available slots
-    if [ ${#available_slots[@]} -eq 0 ]; then
-        echo -e "${RED}Error: No available slots in the array${NC}"
-        echo -e "${YELLOW}All possible slots are already assigned.${NC}"
-        return 1
-    fi
-
-    echo -e "Available slots: ${GREEN}${available_slots[*]}${NC}"
-    echo ""
-
-    # Display information about slot types
-    echo -e "${BLUE}Slot Types:${NC}"
-    echo -e " - Slot 0: Primary parity disk"
-    echo -e " - Slot 29: Secondary parity disk (for dual parity)"
-    echo -e " - Slots 1-28: Data disks"
-    echo ""
 
     # Select a single device
     local selected_device=""
@@ -2034,44 +2059,49 @@ add_disk() {
 
     # Select slot
     local selected_slot=""
-    while true; do
-        echo -e "Enter slot assignment for this disk:"
-        echo -e " P or 0: Parity disk"
-        echo -e " Q or 29: Second parity disk (optional)"
-        echo -e " 1-28: Data disk"
-        echo -e " a: Abort adding disk"
-        read -r -p "Choice: " choice
+    if [ -n "$replace_slot" ]; then
+        selected_slot="$replace_slot"
+        echo -e "Replacing disk in slot ${BLUE}$selected_slot${NC}"
+    else
+        while true; do
+            echo -e "Enter slot assignment for this disk:"
+            echo -e " P or 0: Parity disk"
+            echo -e " Q or 29: Second parity disk (optional)"
+            echo -e " 1-28: Data disk"
+            echo -e " a: Abort adding disk"
+            read -r -p "Choice: " choice
 
-        if [ "$choice" = "a" ] || [ "$choice" = "A" ]; then
-            echo "Operation cancelled."
-            return 0
-        fi
+            if [ "$choice" = "a" ] || [ "$choice" = "A" ]; then
+                echo "Operation cancelled."
+                return 0
+            fi
 
-        # Convert P/Q to slot numbers
-        case "$choice" in
-            [Pp])
-                choice="0"
-                ;;
-            [Qq])
-                choice="29"
-                ;;
-        esac
+            # Convert P/Q to slot numbers
+            case "$choice" in
+                [Pp])
+                    choice="0"
+                    ;;
+                [Qq])
+                    choice="29"
+                    ;;
+            esac
 
-        if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
-            echo -e "${RED}Invalid choice. Please enter a valid slot number or P/Q.${NC}"
-            continue
-        fi
+            if ! [[ "$choice" =~ ^[0-9]+$ ]]; then
+                echo -e "${RED}Invalid choice. Please enter a valid slot number or P/Q.${NC}"
+                continue
+            fi
 
-        # Check if selected slot is available
-        # shellcheck disable=SC2076
-        if ! [[ " ${available_slots[*]} " =~ " $choice " ]]; then
-            echo -e "${RED}Invalid slot. Please choose from available slots: ${available_slots[*]}.${NC}"
-            continue
-        fi
+            # Check if selected slot is available
+            # shellcheck disable=SC2076
+            if ! [[ " ${available_slots[*]} " =~ " $choice " ]]; then
+                echo -e "${RED}Invalid slot. Please choose from available slots: ${available_slots[*]}.${NC}"
+                continue
+            fi
 
-        selected_slot="$choice"
-        break
-    done
+            selected_slot="$choice"
+            break
+        done
+    fi
 
     # Format the slot name for display
     local slot_display="$selected_slot"
@@ -2084,9 +2114,14 @@ add_disk() {
     echo -e "Selected slot: ${BLUE}$slot_display${NC}"
     echo ""
 
+    local verb="add"
+    if [ -n "$replace_slot" ]; then
+        verb="replace"
+    fi
+
     # Confirm selection
-    echo -e "You are about to add: ${BLUE}$(basename "$selected_dev")${NC} to slot ${BLUE}$slot_display${NC}"
-    read -r -p "Proceed with adding this disk? (y/N): " confirm
+    echo -e "You are about to ${YELLOW}$verb${NC}: ${YELLOW}$(basename "$selected_dev")${NC} to slot ${YELLOW}$slot_display${NC}"
+    read -r -p "Proceed with the operation? (y/N): " confirm
 
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         echo "Operation cancelled."
@@ -2419,10 +2454,18 @@ mount_array_disks() {
 
     local mdstate="${NMDSTAT_VALUES[mdState]}"
     if [ "$mdstate" != "STARTED" ]; then
-        echo -e "${RED}Error: Array must be started before mounting disks${NC}"
-        echo -e "Current array state: $mdstate"
-        echo -e "Start the array with: ${YELLOW}nmdctl start${NC}"
-        return 1
+        if [ "$UNATTENDED" -eq 1 ]; then
+            echo -e "${RED}Error: Array must be started before mounting disks (unattended mode)${NC}"
+            return 1
+        fi
+        echo -e "${YELLOW}Array must be started before mounting disks${NC}"
+        read -r -p "Do you want to start the array now? (y/N): " start_now
+        if [[ "$start_now" =~ ^[Yy]$ ]]; then
+            start_array
+        else
+            echo -e "Start the array with: ${YELLOW}nmdctl start${NC}"
+            return 1
+        fi
     fi
 
     echo "=== Mounting NonRAID Array Disks ==="
@@ -2476,14 +2519,20 @@ mount_array_disks() {
                 echo -e "${RED}FAILED${NC}: ${YELLOW}Keyfile '${LUKS_KEYFILE}' does not exist. Cannot open LUKS device.${NC}"
                 error_count=$((error_count + 1))
                 continue
-            elif cryptsetup luksOpen --key-file "$LUKS_KEYFILE" "$device" "$diskname" >/dev/null 2>&1; then
-                echo -e "${GREEN}SUCCESS${NC}"
-                # redetect layered filesystem type after opening LUKS
-                fs_type="$(get_fs_type "$device")"
             else
-                echo -e "${RED}FAILED${NC}: ${YELLOW}Wrong passphrase or keyfile for LUKS device?${NC}"
-                error_count=$((error_count + 1))
-                continue
+                local luks_output
+                luks_output=$(cryptsetup luksOpen --key-file "$LUKS_KEYFILE" "$device" "$diskname" 2>&1)
+                local luks_status=$?
+
+                if [ $luks_status -eq 0 ]; then
+                    echo -e "${GREEN}SUCCESS${NC}"
+                    # redetect layered filesystem type after opening LUKS
+                    fs_type="$(get_fs_type "$device")"
+                else
+                    echo -e "${RED}FAILED${NC}: ${YELLOW}${luks_output}${NC}"
+                    error_count=$((error_count + 1))
+                    continue
+                fi
             fi
         fi
         # Opened luks device, mount the filesystem
@@ -2499,11 +2548,15 @@ mount_array_disks() {
                 local pool_name="disk${slot}"
                 echo -n "Slot $slot (${diskname}): Importing ZFS pool $pool_name... "
 
-                if zpool import -o cachefile=none -d "$device" "$pool_name" 2>/dev/null; then
+                local import_output
+                import_output=$(zpool import -o cachefile=none -d "$device" "$pool_name" 2>&1)
+                local import_status=$?
+
+                if [ $import_status -eq 0 ]; then
                     echo -e "${GREEN}SUCCESS${NC}"
                     mounted_count=$((mounted_count + 1))
                 else
-                    echo -e "${RED}FAILED${NC}"
+                    echo -e "${RED}FAILED${NC}: ${YELLOW}${import_output}${NC}"
                     error_count=$((error_count + 1))
                 fi
                 ;;
@@ -2519,11 +2572,15 @@ mount_array_disks() {
 
                 echo -n "Slot $slot (${diskname}): Mounting ${fs_type^^} to $mountpoint... "
 
-                if mount "$device" "$mountpoint" 2>/dev/null; then
+                local mount_output
+                mount_output=$(mount "$device" "$mountpoint" 2>&1)
+                local mount_status=$?
+
+                if [ $mount_status -eq 0 ]; then
                     echo -e "${GREEN}SUCCESS${NC}"
                     mounted_count=$((mounted_count + 1))
                 else
-                    echo -e "${RED}FAILED${NC}"
+                    echo -e "${RED}FAILED${NC}: ${YELLOW}${mount_output}${NC}"
                     error_count=$((error_count + 1))
                 fi
                 ;;
@@ -2747,6 +2804,10 @@ main() {
 
     case "$command" in
         "status")
+            if [ "$1" = "--verbose" ] || [ "$1" = "-v" ]; then
+                VERBOSE=1
+                shift
+            fi
             show_status
             ;;
         "create")
@@ -2764,6 +2825,13 @@ main() {
         "add")
             add_disk
             ;;
+        "replace")
+            if [ -z "$1" ] || [[ "$1" == -* ]]; then
+                echo -e "${RED}Error: Missing slot parameter for replace command${NC}"
+                return 1
+            fi
+            add_disk "$1"
+            ;;
         "unassign")
             unassign_disk "$1"
             ;;
@@ -2777,6 +2845,14 @@ main() {
             stop_check "$1"
             ;;
         "mount")
+            if [ "$1" = "-k" ] || [ "$1" = "--key-file" ]; then
+                if [ -z "$2" ] || [[ "$2" == -* ]]; then
+                    echo -e "${RED}Error: --keyfile requires a path argument${NC}"
+                    usage
+                fi
+                LUKS_KEYFILE="$2"
+                shift 2
+            fi
             mount_array_disks "$1"
             ;;
         "unmount"|"umount")

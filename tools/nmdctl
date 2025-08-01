@@ -2454,10 +2454,18 @@ mount_array_disks() {
 
     local mdstate="${NMDSTAT_VALUES[mdState]}"
     if [ "$mdstate" != "STARTED" ]; then
-        echo -e "${RED}Error: Array must be started before mounting disks${NC}"
-        echo -e "Current array state: $mdstate"
-        echo -e "Start the array with: ${YELLOW}nmdctl start${NC}"
-        return 1
+        if [ "$UNATTENDED" -eq 1 ]; then
+            echo -e "${RED}Error: Array must be started before mounting disks (unattended mode)${NC}"
+            return 1
+        fi
+        echo -e "${YELLOW}Array must be started before mounting disks${NC}"
+        read -r -p "Do you want to start the array now? (y/N): " start_now
+        if [[ "$start_now" =~ ^[Yy]$ ]]; then
+            start_array
+        else
+            echo -e "Start the array with: ${YELLOW}nmdctl start${NC}"
+            return 1
+        fi
     fi
 
     echo "=== Mounting NonRAID Array Disks ==="

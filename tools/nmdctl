@@ -2511,14 +2511,20 @@ mount_array_disks() {
                 echo -e "${RED}FAILED${NC}: ${YELLOW}Keyfile '${LUKS_KEYFILE}' does not exist. Cannot open LUKS device.${NC}"
                 error_count=$((error_count + 1))
                 continue
-            elif cryptsetup luksOpen --key-file "$LUKS_KEYFILE" "$device" "$diskname" >/dev/null 2>&1; then
-                echo -e "${GREEN}SUCCESS${NC}"
-                # redetect layered filesystem type after opening LUKS
-                fs_type="$(get_fs_type "$device")"
             else
-                echo -e "${RED}FAILED${NC}: ${YELLOW}Wrong passphrase or keyfile for LUKS device?${NC}"
-                error_count=$((error_count + 1))
-                continue
+                local luks_output
+                luks_output=$(cryptsetup luksOpen --key-file "$LUKS_KEYFILE" "$device" "$diskname" 2>&1)
+                local luks_status=$?
+
+                if [ $luks_status -eq 0 ]; then
+                    echo -e "${GREEN}SUCCESS${NC}"
+                    # redetect layered filesystem type after opening LUKS
+                    fs_type="$(get_fs_type "$device")"
+                else
+                    echo -e "${RED}FAILED${NC}: ${YELLOW}${luks_output}${NC}"
+                    error_count=$((error_count + 1))
+                    continue
+                fi
             fi
         fi
         # Opened luks device, mount the filesystem
@@ -2534,11 +2540,15 @@ mount_array_disks() {
                 local pool_name="disk${slot}"
                 echo -n "Slot $slot (${diskname}): Importing ZFS pool $pool_name... "
 
-                if zpool import -o cachefile=none -d "$device" "$pool_name" 2>/dev/null; then
+                local import_output
+                import_output=$(zpool import -o cachefile=none -d "$device" "$pool_name" 2>&1)
+                local import_status=$?
+
+                if [ $import_status -eq 0 ]; then
                     echo -e "${GREEN}SUCCESS${NC}"
                     mounted_count=$((mounted_count + 1))
                 else
-                    echo -e "${RED}FAILED${NC}"
+                    echo -e "${RED}FAILED${NC}: ${YELLOW}${import_output}${NC}"
                     error_count=$((error_count + 1))
                 fi
                 ;;
@@ -2554,11 +2564,15 @@ mount_array_disks() {
 
                 echo -n "Slot $slot (${diskname}): Mounting ${fs_type^^} to $mountpoint... "
 
-                if mount "$device" "$mountpoint" 2>/dev/null; then
+                local mount_output
+                mount_output=$(mount "$device" "$mountpoint" 2>&1)
+                local mount_status=$?
+
+                if [ $mount_status -eq 0 ]; then
                     echo -e "${GREEN}SUCCESS${NC}"
                     mounted_count=$((mounted_count + 1))
                 else
-                    echo -e "${RED}FAILED${NC}"
+                    echo -e "${RED}FAILED${NC}: ${YELLOW}${mount_output}${NC}"
                     error_count=$((error_count + 1))
                 fi
                 ;;

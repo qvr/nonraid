@@ -312,9 +312,9 @@ get_defined_slots_count() {
     fi
 
     local count=0
-    # Count all keys matching diskId.X with non-empty values
+    # Count all keys matching diskSize.X with non-zero values
     for key in "${!NMDSTAT_VALUES[@]}"; do
-        if [[ $key =~ ^diskId\.[0-9]+$ ]] && [ -n "${NMDSTAT_VALUES[$key]}" ]; then
+        if [[ $key =~ ^diskSize\.([0-9]+)$ ]] && [ "${NMDSTAT_VALUES[$key]}" -gt 0 ]; then
             count=$((count + 1))
         fi
     done
@@ -331,9 +331,9 @@ get_defined_slots() {
     fi
 
     local slots=()
-    # Extract slot numbers for keys matching diskId.X with non-empty values
+    # Extract slot numbers for keys matching diskSize.X with non-zero values
     for key in "${!NMDSTAT_VALUES[@]}"; do
-        if [[ $key =~ ^diskId\.([0-9]+)$ ]] && [ -n "${NMDSTAT_VALUES[$key]}" ]; then
+        if [[ $key =~ ^diskSize\.([0-9]+)$ ]] && [ "${NMDSTAT_VALUES[$key]}" -gt 0 ]; then
             slots+=("${BASH_REMATCH[1]}")
         fi
     done

@@ -1101,7 +1101,7 @@ import_disks() {
 
         # Check if this slot has been intentionally disabled (DISK_NP_MISSING status)
         local rdevstatus=$(get_nmdstat_value "rdevStatus.$slot")
-        if [ "$rdevstatus" = "DISK_NP_MISSING" ]; then
+        if [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ]; then
             echo -e "${YELLOW}Skipping slot $slot: Disk has been unassigned (status: $rdevstatus)${NC}"
             continue
         fi
@@ -1254,7 +1254,7 @@ start_array() {
 
         if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
             imported_disks=$((imported_disks + 1))
-        elif [ "$rdevstatus" != "DISK_NP_MISSING" ]; then
+        elif [ "$rdevstatus" != "DISK_NP_MISSING" ] && [ "$rdevstatus" != "DISK_NP_DSBL" ]; then
             # Only consider it missing if it's not intentionally unassigned
             missing_slots+=("$slot")
         fi
@@ -1776,14 +1776,13 @@ add_disk() {
         return 1
     fi
 
-    # Check current array state
-    local mdstate=$(get_nmdstat_value "mdState")
-
-    if [ "$mdstate" = "STARTED" ]; then
-        echo -e "${RED}Error: Array is currently running${NC}"
-        echo -e "${YELLOW}Stop the array first with: ${GREEN}nmdctl stop${NC}"
-        return 1
+    # Get all nmdstat values if we haven't already
+    if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
+        get_all_nmdstat_values NMDSTAT_VALUES
     fi
+
+    # Check current array state
+    local mdstate="${NMDSTAT_VALUES[mdState]}"
 
     if [ "$mdstate" = "NEW_ARRAY" ]; then
         echo -e "${RED}Error: Cannot add disk to a new array${NC}"
@@ -1791,11 +1790,17 @@ add_disk() {
         return 1
     fi
 
+    if [ "$mdstate" != "STOPPED" ]; then
+        echo -e "${RED}Error: Array is currently not in stopped state (${mdstate})${NC}"
+        echo -e "${YELLOW}Stop the array first with: ${GREEN}nmdctl stop${NC}"
+        return 1
+    fi
+
     # Count the number of disks that have been imported
     local imported_disks=0
     local total_slots=$(get_defined_slots_count)
     for slot in $(get_defined_slots); do
-        local rdevname=$(get_nmdstat_value "rdevName.$slot")
+        local rdevname="${NMDSTAT_VALUES[rdevName.$slot]}"
         if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
             imported_disks=$((imported_disks + 1))
         fi
@@ -1812,7 +1817,7 @@ add_disk() {
     fi
 
     # Check if we have any new disks already
-    local mdnumnew=$(get_nmdstat_value "mdNumNew")
+    local mdnumnew="${NMDSTAT_VALUES[mdNumNew]}"
     if [ -n "$mdnumnew" ] && [ "$mdnumnew" -gt 0 ]; then
         echo -e "${RED}Error: Array already has a new disk added${NC}"
         echo -e "${YELLOW}The driver only supports adding one disk at a time.${NC}"
@@ -1840,13 +1845,13 @@ add_disk() {
     # Get list of all disk IDs already in the array
     local array_disk_ids=()
     for slot in $(seq 0 29); do
-        local disk_id=$(get_nmdstat_value "diskId.$slot")
+        local disk_id="${NMDSTAT_VALUES[diskId.$slot]}"
         if [ -n "$disk_id" ] && [ "$disk_id" != "none" ]; then
             array_disk_ids+=("$disk_id")
         fi
 
         # Also check rdevId for newly added disks
-        local rdev_id=$(get_nmdstat_value "rdevId.$slot")
+        local rdev_id="${NMDSTAT_VALUES[rdevId.$slot]}"
         if [ -n "$rdev_id" ] && [ "$rdev_id" != "none" ]; then
             array_disk_ids+=("$rdev_id")
         fi
@@ -1905,8 +1910,7 @@ add_disk() {
 
     # Then, determine which slots are available
     for slot in $(seq 1 28); do
-        # shellcheck disable=SC2076
-        if ! [[ " ${used_slots[*]} " =~ " $slot " ]]; then
+        if ! [ -n "${NMDSTAT_VALUES[rdevId.$slot]}" ]; then
             available_slots+=("$slot")
         fi
     done
@@ -1915,11 +1919,11 @@ add_disk() {
     local has_parity=false
     local has_second_parity=false
 
-    if [[ " ${used_slots[*]} " =~ " 0 " ]]; then
+    if [ -n "${NMDSTAT_VALUES[rdevId.0]}" ]; then
         has_parity=true
     fi
 
-    if [[ " ${used_slots[*]} " =~ " 29 " ]]; then
+    if [ -n "${NMDSTAT_VALUES[rdevId.29]}" ]; then
         has_second_parity=true
     fi
 
@@ -1927,10 +1931,7 @@ add_disk() {
     if ! $has_parity; then
         available_slots+=("0")
         echo -e "${YELLOW}No parity disk found. Consider adding a parity disk (slot 0).${NC}"
-    fi
-
-    # If no second parity disk, suggest adding that as an option
-    if ! $has_second_parity; then
+    elif ! $has_second_parity; then
         available_slots+=("29")
         echo -e "${YELLOW}No second parity disk found. You may add one (slot 29) for dual parity.${NC}"
     fi
@@ -2180,12 +2181,6 @@ unassign_disk() {
         size_gb=$(( (rdev_size + 1048575) / 1048576 ))
     fi
 
-    # Check if the slot has a disk assigned
-    if [ -z "$disk_id" ]; then
-        echo -e "${RED}Error: No disk assigned to slot $slot${NC}"
-        return 1
-    fi
-
     # Format the slot name for display
     local slot_display="$slot"
     if [ "$slot" = "0" ]; then
@@ -2194,35 +2189,48 @@ unassign_disk() {
         slot_display="Q (29)"
     fi
 
-    # Display slot information
-    echo -e "=== Disk in Slot ${BLUE}$slot_display${NC} ==="
-    echo -e "Disk ID      : $disk_id"
-    if [ -n "$rdev_name" ] && [ "$rdev_name" != "none" ]; then
-        echo -e "Device       : $rdev_name"
+    # Check if the slot currently has a disk assigned
+    if [ -z "$disk_id" ]; then
+        # If ID is empty, but size is 0, it means the disk was already previously unassigned, and we can skip asking confirmation
+        if [ "$disk_size" -eq 0 ]; then
+            echo -e "${RED}Error: No disk assigned to slot $slot${NC}"
+            return 1
+        fi
+        if [ "$rdev_status" = "DISK_NP_DSBL" ]; then
+            echo -e "${RED}Error: Disk in slot $slot is already unassigned${NC}"
+            return 1
+        fi
     else
-        echo -e "Device       : ${YELLOW}Not imported${NC}"
-    fi
-    echo -e "Status       : $(format_disk_status "$rdev_status")"
-    echo -e "Size         : $size_gb GB"
-    echo ""
+        # Display slot information
+        echo -e "=== Disk in Slot ${BLUE}$slot_display${NC} ==="
+        echo -e "Disk ID      : $disk_id"
+        if [ -n "$rdev_name" ] && [ "$rdev_name" != "none" ]; then
+            echo -e "Device       : $rdev_name"
+        else
+            echo -e "Device       : ${YELLOW}Not imported${NC}"
+        fi
+        echo -e "Status       : $(format_disk_status "$rdev_status")"
+        echo -e "Size         : $size_gb GB"
+        echo ""
 
-    # Warn about potential data loss
-    echo -e "${RED}WARNING: Unassigning this disk will remove it from the array.${NC}"
-    if [ "$slot" = "0" ] || [ "$slot" = "29" ]; then
-        echo -e "${RED}This is a PARITY disk. Unassigning it will remove parity protection.${NC}"
-    else
-        echo -e "${RED}This is a DATA disk. Unassigning it will cause its contents to be emulated via parity (if available).${NC}"
-    fi
-    echo ""
+        # Warn about potential data loss
+        echo -e "${RED}WARNING: Unassigning this disk will remove it from the array.${NC}"
+        if [ "$slot" = "0" ] || [ "$slot" = "29" ]; then
+            echo -e "${RED}This is a PARITY disk. Unassigning it will remove parity protection.${NC}"
+        else
+            echo -e "${RED}This is a DATA disk. Unassigning it will cause its contents to be emulated via parity (if available).${NC}"
+        fi
+        echo ""
 
-    # Ask for confirmation
-    read -r -p "Are you sure you want to unassign this disk? (y/N): " confirm
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        echo "Operation cancelled."
-        return 1
+        # Ask for confirmation
+        read -r -p "Are you sure you want to unassign this disk? (y/N): " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Operation cancelled."
+            return 1
+        fi
+        echo ""
     fi
 
-    echo ""
     echo -e "Unassigning disk from slot $slot_display..."
 
     # Unassign the disk by importing an empty device
@@ -2382,13 +2390,12 @@ mount_array_disks() {
             continue
         fi
 
-        local rdevname="${NMDSTAT_VALUES[rdevName.$slot]}"
-        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$slot]}"
         local diskname="${NMDSTAT_VALUES[diskName.$slot]}"
         local diskid="${NMDSTAT_VALUES[diskId.$slot]}"
+        local disksize="${NMDSTAT_VALUES[diskSize.$slot]}"
 
-        # Skip slots with no device or not in DISK_OK status
-        if [ -z "$rdevname" ] || [ "$rdevname" = "none" ] || [ "$rdevstatus" != "DISK_OK" ]; then
+        # Skip slots with no nmd device or size 0
+        if [ -z "$diskname" ] || [ "$disksize" -eq 0 ]; then
             continue
         fi
 
@@ -2517,13 +2524,12 @@ unmount_array_disks() {
             continue
         fi
 
-        local rdevname="${NMDSTAT_VALUES[rdevName.$slot]}"
-        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$slot]}"
         local diskname="${NMDSTAT_VALUES[diskName.$slot]}"
         local diskid="${NMDSTAT_VALUES[diskId.$slot]}"
+        local disksize="${NMDSTAT_VALUES[diskSize.$slot]}"
 
-        # Skip slots with no device or not in DISK_OK status
-        if [ -z "$rdevname" ] || [ "$rdevname" = "none" ] || [ "$rdevstatus" != "DISK_OK" ]; then
+        # Skip slots with no nmd device or size 0
+        if [ -z "$diskname" ] || [ "$disksize" -eq 0 ]; then
             continue
         fi
 

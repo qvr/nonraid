@@ -34,8 +34,6 @@ sudo apt install dkms linux-headers-$(uname -r) build-essential
 sudo apt install ./nonraid-dkms_*.deb
 # check that the dkms module is installed
 sudo dkms status
-# might be required on Debian 12:
-# sudo dkms install --force nonraid-dkms/1.2.0
 sudo update-initramfs -u -k all
 ```
 > [!NOTE]

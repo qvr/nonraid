@@ -2782,6 +2782,10 @@ main() {
 
     case "$command" in
         "status")
+            if [ "$1" = "--verbose" ] || [ "$1" = "-v" ]; then
+                VERBOSE=1
+                shift
+            fi
             show_status
             ;;
         "create")
@@ -2819,6 +2823,14 @@ main() {
             stop_check "$1"
             ;;
         "mount")
+            if [ "$1" = "-k" ] || [ "$1" = "--key-file" ]; then
+                if [ -z "$2" ] || [[ "$2" == -* ]]; then
+                    echo -e "${RED}Error: --keyfile requires a path argument${NC}"
+                    usage
+                fi
+                LUKS_KEYFILE="$2"
+                shift 2
+            fi
             mount_array_disks "$1"
             ;;
         "unmount"|"umount")

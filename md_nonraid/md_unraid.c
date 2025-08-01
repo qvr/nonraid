@@ -768,7 +768,7 @@ static int import_slot(dev_t array_dev, int slot, char *name,
 		if (!disk_valid(disk))
 			mddev->num_invalid++;
 
-                if (!is_parity_idx(slot))
+                if (!is_parity_idx(slot) && sb->num_disks < slot+2)
                         sb->num_disks = slot+2;
 	}
 	else {
@@ -782,7 +782,7 @@ static int import_slot(dev_t array_dev, int slot, char *name,
                         rdev->status = DISK_NEW;
                         mddev->num_new++;
 
-                        if (!is_parity_idx(slot))
+                        if (!is_parity_idx(slot) && sb->num_disks < slot+2)
                                 sb->num_disks = slot+2;
                 }
         }

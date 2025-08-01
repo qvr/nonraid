@@ -357,3 +357,4 @@ subsys_initcall(raid6_select_algo);
 module_exit(raid6_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("RAID6 Q-syndrome calculations");
+MODULE_VERSION("6.8.0-nonraid");

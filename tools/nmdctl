@@ -1101,7 +1101,7 @@ import_disks() {
 
         # Check if this slot has been intentionally disabled (DISK_NP_MISSING status)
         local rdevstatus=$(get_nmdstat_value "rdevStatus.$slot")
-        if [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ]; then
+        if [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ -z "$disk_id" ]; then
             echo -e "${YELLOW}Skipping slot $slot: Disk has been unassigned (status: $rdevstatus)${NC}"
             continue
         fi
@@ -1903,36 +1903,25 @@ add_disk() {
     echo ""
 
     # Find available slots
-    local used_slots=()
     local available_slots=()
-
-    used_slots=($(get_defined_slots))
+    local replaceable_slots=()
 
     # Then, determine which slots are available
-    for slot in $(seq 1 28); do
-        if ! [ -n "${NMDSTAT_VALUES[rdevId.$slot]}" ]; then
+    for slot in $(seq 0 29); do
+        if [ -z "${NMDSTAT_VALUES[rdevId.$slot]}" ] && [ -z "${NMDSTAT_VALUES[diskId.$slot]}" ]; then
             available_slots+=("$slot")
+            if [ "${NMDSTAT_VALUES[diskSize.$slot]}" -gt 0 ]; then
+                replaceable_slots+=("$slot")
+            fi
         fi
     done
 
-    # Check if parity disks (slots 0 and 29) are used
-    local has_parity=false
-    local has_second_parity=false
-
-    if [ -n "${NMDSTAT_VALUES[rdevId.0]}" ]; then
-        has_parity=true
-    fi
-
-    if [ -n "${NMDSTAT_VALUES[rdevId.29]}" ]; then
-        has_second_parity=true
-    fi
-
-    # If no parity disk, suggest adding that first
-    if ! $has_parity; then
-        available_slots+=("0")
+    # Priority suggestion list: any missing disks, then parity disks
+    if [ ${#replaceable_slots[@]} -gt 0 ]; then
+        echo -e "${YELLOW}You should replace unassigned disk in slots: ${GREEN}${replaceable_slots[*]}${NC}"
+    elif [ -z "${NMDSTAT_VALUES[rdevId.0]}" ]; then
         echo -e "${YELLOW}No parity disk found. Consider adding a parity disk (slot 0).${NC}"
-    elif ! $has_second_parity; then
-        available_slots+=("29")
+    elif [ -z "${NMDSTAT_VALUES[rdevId.29]}" ]; then
         echo -e "${YELLOW}No second parity disk found. You may add one (slot 29) for dual parity.${NC}"
     fi
 

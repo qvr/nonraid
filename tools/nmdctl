@@ -1106,8 +1106,6 @@ import_disks() {
             # Check for partitions
             if [ -b "${found_device}1" ]; then
                 partition="${found_device}1"
-            elif [ -b "${found_device}p1" ]; then
-                partition="${found_device}p1"
             fi
 
             if [ -n "$partition" ]; then

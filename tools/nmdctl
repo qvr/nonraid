@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.3.0
+VERSION=1.4.0
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -923,18 +923,8 @@ get_mountpoint() {
                 mountpoint=$(get_mountpoint "/dev/mapper/$device" "$luks_fs")
             fi
             ;;
-        "xfs"|"ext4"|"ext3"|"ext2"|"btrfs")
-            # These filesystems can be found directly in /proc/mounts
-            local abs_device=$device
-            [[ "$device" != /dev/* ]] && abs_device="/dev/$device"
-            local found_mountpoint=$(grep -w "$abs_device" /proc/mounts | awk '{print $2}' | head -1)
-            if [ -n "$found_mountpoint" ]; then
-                mountpoint="$found_mountpoint"
-            fi
-            ;;
 
         "zfs")
-            # For ZFS, we need to identify the pool name and dataset
             # Get ZFS pool name that contains this device
             if command -v zpool >/dev/null 2>&1; then
                 local rel_device=$(basename "$device")
@@ -946,11 +936,7 @@ get_mountpoint() {
                 done)
 
                 if [ -n "$pool" ]; then
-                    # Check if the pool is mounted
-                    local zfs_mounts=$(zfs list -H -o name,mountpoint | grep -v "none$")
-                    # Start with the pool itself
-                    local found_mountpoint=$(echo "$zfs_mounts" | grep "^${pool}[[:blank:]]" | awk '{print $2}' | head -1)
-
+                    local found_mountpoint=$(zfs list -H -o mountpoint "$pool" 2>/dev/null)
                     if [ -n "$found_mountpoint" ] && [ "$found_mountpoint" != "none" ]; then
                         mountpoint="$found_mountpoint"
                     fi
@@ -958,8 +944,8 @@ get_mountpoint() {
             fi
             ;;
 
-        *)
-            # Generic approach for other filesystem types
+        "xfs"|"ext4"|"ext3"|"ext2"|"btrfs"|*)
+            # These filesystems can be found directly in /proc/mounts
             local abs_device="$device"
             [[ "$device" != /dev/* ]] && abs_device="/dev/$device"
             local found_mountpoint=$(grep -w "$abs_device" /proc/mounts 2>/dev/null | awk '{print $2}' | head -1)
@@ -2546,13 +2532,23 @@ mount_array_disks() {
             "zfs")
                 # For ZFS, we need to import the pool
                 local pool_name="disk${slot}"
-                echo -n "Slot $slot (${diskname}): Importing ZFS pool $pool_name... "
+                local mountpoint="${mount_prefix}${slot}"
+
+                # Create mountpoint if it doesn't exist
+                if [ ! -d "$mountpoint" ]; then
+                    mkdir -p "$mountpoint"
+                fi
+
+                echo -n "Slot $slot (${diskname}): Importing ZFS pool $pool_name to $mountpoint... "
 
                 local import_output
                 import_output=$(zpool import -o cachefile=none -d "$device" "$pool_name" 2>&1)
                 local import_status=$?
 
                 if [ $import_status -eq 0 ]; then
+                    if [ "$(zfs get -H -o value mountpoint "$pool_name")" != "$mountpoint" ]; then
+                        zfs set mountpoint="$mountpoint" "$pool_name"
+                    fi
                     echo -e "${GREEN}SUCCESS${NC}"
                     mounted_count=$((mounted_count + 1))
                 else

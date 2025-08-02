@@ -1336,11 +1336,50 @@ stop_array() {
         return 1
     fi
 
-    local mdstate=$(get_nmdstat_value "mdState")
+    # Get all nmdstat values if we haven't already
+    if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
+        get_all_nmdstat_values NMDSTAT_VALUES
+    fi
+
+    local mdstate=${NMDSTAT_VALUES["mdState"]}
 
     if [ "$mdstate" != "STARTED" ]; then
         echo -e "${YELLOW}Array is not running (current state: $mdstate)${NC}"
         return 0
+    fi
+
+    local unmount_needed=0
+    # Check if we need to unmount any filesystems before stopping
+    for slot in $(get_defined_slots); do
+        local diskname="${NMDSTAT_VALUES["diskName.$slot"]}"
+        local fs_type=$(get_fs_type "$diskname")
+        local current_mountpoint=$(get_mountpoint "$diskname" "$fs_type")
+        if [ -n "$current_mountpoint" ]; then
+            unmount_needed=1
+            break
+        fi
+    done
+
+    if [ "$unmount_needed" -eq 1 ]; then
+        if [ "$UNATTENDED" -eq 1 ]; then
+            echo -e "${RED}Error: Cannot stop array with mounted filesystems in unattended mode${NC}"
+            return 1
+        fi
+
+        echo -e "${YELLOW}Warning: Some filesystems are mounted. Unmount them before stopping the array.${NC}"
+        read -r -p "Do you want to unmount all filesystems? (y/N): " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Array stop cancelled by user"
+            return 1
+        fi
+
+        if ! unmount_array_disks; then
+            echo ""
+            echo -e "${RED}Error: Failed to unmount some filesystems${NC}"
+            echo "Please unmount them manually before stopping the array"
+            return 1
+        fi
+        echo ""
     fi
 
     echo "Stopping array..."

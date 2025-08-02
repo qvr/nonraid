@@ -2709,8 +2709,8 @@ unmount_array_disks() {
                     # Get the pool name that contains this device
                     local pool_name=""
                     if command -v zpool >/dev/null 2>&1; then
-                        pool_name=$(zpool list -H -o name,health | awk '{print $1}' | while read -r pool; do
-                            if zpool status "$pool" 2>/dev/null | grep -q "$diskname"; then
+                        pool_name=$(zpool list -H -o name | while read -r pool; do
+                            if zpool list -v -H -o name "$pool" 2>/dev/null | grep -q "$diskname"; then
                                 echo "$pool"
                                 break
                             fi
@@ -2723,7 +2723,7 @@ unmount_array_disks() {
                             echo -e "${GREEN}SUCCESS${NC}"
                             unmounted_count=$((unmounted_count + 1))
                         else
-                            echo -e "${RED}FAILED${NC}"
+                            echo -e "${RED}FAILED${NC} (Device may be busy)"
                             error_count=$((error_count + 1))
                         fi
                     else

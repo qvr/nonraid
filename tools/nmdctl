@@ -2257,7 +2257,7 @@ unassign_disk() {
 
     # Check if array is stopped
     local mdstate="${NMDSTAT_VALUES[mdState]}"
-    if [ "$mdstate" != "STOPPED" ]; then
+    if [ "$mdstate" = "STARTED" ]; then
         echo -e "${RED}Error: Array must be stopped before unassigning disks${NC}"
         echo -e "Stop the array with: ${YELLOW}nmdctl stop${NC}"
         return 1
@@ -2328,22 +2328,26 @@ unassign_disk() {
         echo ""
     fi
 
-    echo -e "Unassigning disk from slot $slot_display..."
-
-    local reload_done=0
-    # If any slots are currently imported, we need to reload driver before unassigning
+    local unassigned_disks=0
+    local parity_count=0
+    # Check if other slots are already unassigned
     for check_slot in $(get_defined_slots); do
-        local check_rdev_name="${NMDSTAT_VALUES[rdevName.$check_slot]}"
-        if [ -n "$check_rdev_name" ] && [ "$check_rdev_name" != "none" ]; then
-            echo -e "${YELLOW}Slot(s) already imported, reloading nonraid module first to unassign disk...${NC}"
-            if ! reload_module 1; then
-                echo -e "${RED}Error: Failed to reload nonraid module${NC}"
-                return 1
-            fi
-            reload_done=1
-            break
+        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$check_slot]}"
+        if [ -n "$rdevstatus" ] && ( [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ] ); then
+            unassigned_disks=$((unassigned_disks + 1))
         fi
     done
+    [ "${NMDSTAT_VALUES[diskSize.0]}" -gt 0 ] && parity_count=$((parity_count + 1))
+    [ "${NMDSTAT_VALUES[diskSize.29]}" -gt 0 ] && parity_count=$((parity_count + 1))
+
+    if [ "$((unassigned_disks+1))" -gt "$parity_count" ]; then
+        echo -e "${RED}Error: Parity count in array does not allow unassigning more disks${NC}"
+        echo -e "${YELLOW}You can only unassign disks if there are enough parity disks to maintain data integrity.${NC}"
+        echo -e "${YELLOW}Current parity count: $parity_count, unassigned disks: $unassigned_disks${NC}"
+        return 1
+    fi
+
+    echo -e "Unassigning disk from slot $slot_display..."
 
     # Unassign the disk by importing an empty device
     if ! run_nmd_command "import $slot '' 0 0 0 ''"; then
@@ -2353,11 +2357,6 @@ unassign_disk() {
 
     echo -e "${GREEN}Successfully unassigned disk from slot $slot_display${NC}"
     echo ""
-
-    if [ "$reload_done" -eq 1 ]; then
-        echo -e "${YELLOW}Module reload was done, importing back rest of the disks.${NC}"
-        import_disks 1
-    fi
 
     # Show array status
     show_status

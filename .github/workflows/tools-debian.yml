@@ -8,10 +8,10 @@ on:
         required: false
         default: false
         type: boolean
-      prerelease:
-        description: 'Create as prerelease'
+      draft_release:
+        description: 'Create release as draft (no tag)'
         required: false
-        default: true
+        default: false
         type: boolean
 
 jobs:
@@ -58,23 +58,49 @@ jobs:
           path: "*.deb"
           retention-days: 30
 
+      - name: Get Commits Since Last Release
+        id: get-commits
+        if: ${{ github.event.inputs.create_release == 'true' }}
+        run: |
+          LAST_TOOLS_TAG=$(git tag -l "nonraid-tools-*" --sort=-committerdate | head -n1 || echo "none")
+          if [ "$LAST_TOOLS_TAG" = "none" ]; then
+            # If no nonraid-tools tags exist, get all commits
+            COMMITS=$(git log --pretty=format:"- %s (%h)" -- tools/)
+          else
+            # Get commits since the last nonraid-tools tag
+            COMMITS=$(git log ${LAST_TOOLS_TAG}..HEAD --pretty=format:"- %s (%h)" -- tools/)
+          fi
+          # Escape newlines for GitHub Actions output
+          COMMITS="${COMMITS//'%'/'%25'}"
+          COMMITS="${COMMITS//$'\n'/'%0A'}"
+          COMMITS="${COMMITS//$'\r'/'%0D'}"
+          echo "commits<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create Release
         if: ${{ github.event.inputs.create_release == 'true' }}
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          prerelease: ${{ github.event.inputs.prerelease }}
-          tag_name: nonraid-tools-${{ steps.get-nmdctl.outputs.version }}-${{ steps.get-build.outputs.build }}
+          tag_name: ${{ github.event.inputs.draft_release != 'true' && format('nonraid-tools-{0}-{1}', steps.get-nmdctl.outputs.version, steps.get-build.outputs.build) || '' }}
           name: NonRAID Tools Debian Package - Version ${{ steps.get-nmdctl.outputs.version }} Build ${{ steps.get-build.outputs.build }}
+          draft: ${{ github.event.inputs.draft_release }}
           body: |
             **NonRAID Tools Package - Version ${{ steps.get-nmdctl.outputs.version }} Build ${{ steps.get-build.outputs.build }}**
 
             This release contains the NonRAID array management tools package for Ubuntu/Debian systems.
+            ${{ github.event.inputs.draft_release == 'true' && format('
+            > ⚠️ **DRAFT RELEASE** - This is a draft release without an associated Git tag. Finalize this release before tagging as:
+            > `nonraid-tools-{0}-{1}`', steps.get-nmdctl.outputs.version, steps.get-build.outputs.build) || '' }}
 
             ## What's Included
             - `/usr/bin/nmdctl`
             - `nonraid.service` systemd unit file
+
+            ## Changes Since Last Release
+            ${{ steps.get-commits.outputs.commits }}
 
             ## Installation
             ```bash

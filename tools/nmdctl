@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.4.0
+VERSION=1.5.0
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -976,7 +976,7 @@ get_fs_usage() {
             # For ZFS, we need to use zfs command to get usage
             if command -v zfs >/dev/null 2>&1; then
                 # Extract pool/dataset name from the mountpoint
-                local dataset=$(zfs list -H -o name,mountpoint | grep "[[:space:]]$mountpoint$" | awk '{print $1}' | head -1)
+                local dataset=$(zfs list -H -o name "$mountpoint" 2>/dev/null)
                 if [ -n "$dataset" ]; then
                     # Use zfs get to get the percentage directly
                     local usage=$(zpool list -H -o cap "$dataset" 2>/dev/null)
@@ -1336,11 +1336,50 @@ stop_array() {
         return 1
     fi
 
-    local mdstate=$(get_nmdstat_value "mdState")
+    # Get all nmdstat values if we haven't already
+    if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
+        get_all_nmdstat_values NMDSTAT_VALUES
+    fi
+
+    local mdstate=${NMDSTAT_VALUES["mdState"]}
 
     if [ "$mdstate" != "STARTED" ]; then
         echo -e "${YELLOW}Array is not running (current state: $mdstate)${NC}"
         return 0
+    fi
+
+    local unmount_needed=0
+    # Check if we need to unmount any filesystems before stopping
+    for slot in $(get_defined_slots); do
+        local diskname="${NMDSTAT_VALUES["diskName.$slot"]}"
+        local fs_type=$(get_fs_type "$diskname")
+        local current_mountpoint=$(get_mountpoint "$diskname" "$fs_type")
+        if [ -n "$current_mountpoint" ]; then
+            unmount_needed=1
+            break
+        fi
+    done
+
+    if [ "$unmount_needed" -eq 1 ]; then
+        if [ "$UNATTENDED" -eq 1 ]; then
+            echo -e "${RED}Error: Cannot stop array with mounted filesystems in unattended mode${NC}"
+            return 1
+        fi
+
+        echo -e "${YELLOW}Warning: Some filesystems are mounted. Unmount them before stopping the array.${NC}"
+        read -r -p "Do you want to unmount all filesystems? (y/N): " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Array stop cancelled by user"
+            return 1
+        fi
+
+        if ! unmount_array_disks; then
+            echo ""
+            echo -e "${RED}Error: Failed to unmount some filesystems${NC}"
+            echo "Please unmount them manually before stopping the array"
+            return 1
+        fi
+        echo ""
     fi
 
     echo "Stopping array..."
@@ -2670,8 +2709,8 @@ unmount_array_disks() {
                     # Get the pool name that contains this device
                     local pool_name=""
                     if command -v zpool >/dev/null 2>&1; then
-                        pool_name=$(zpool list -H -o name,health | awk '{print $1}' | while read -r pool; do
-                            if zpool status "$pool" 2>/dev/null | grep -q "$diskname"; then
+                        pool_name=$(zpool list -H -o name | while read -r pool; do
+                            if zpool list -v -H -o name "$pool" 2>/dev/null | grep -q "$diskname"; then
                                 echo "$pool"
                                 break
                             fi
@@ -2684,7 +2723,7 @@ unmount_array_disks() {
                             echo -e "${GREEN}SUCCESS${NC}"
                             unmounted_count=$((unmounted_count + 1))
                         else
-                            echo -e "${RED}FAILED${NC}"
+                            echo -e "${RED}FAILED${NC} (Device may be busy)"
                             error_count=$((error_count + 1))
                         fi
                     else

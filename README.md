@@ -81,9 +81,16 @@ Once the array is started, the nmd devices will be available as `/dev/nmdXp1`, w
 >
 > One way to avoid this is to use LUKS encryption on the NonRAID disks, which prevents OS services from detecting the filesystems on raw devices at all.
 
+###### "New Config" mode
+If you want to change the array topology, like adding or removing disks, you can use the "New Config" mode. This is similar to the UnRAID "New Config" operation, and it allows you to start with a fresh array configuration without needing to recreate the configuration completely from scratch. If a disk to be removed disk is first zeroed **properly**, then you can optionally mark the parity valid for the newly created config to skip the parity reconstruction.
+```bash
+sudo nmdctl create
+```
+This will detect an existing array configuration, and prompt you to confirm that you want to create a new array configuration. Old superblock file will be renamed to `/nonraid.dat.bak` (default path), and a new superblock file will be created. When assigning disks to slots, the old slot assignment is given as an option.
+
 ##### Start/stop the array
 
-Automatically imports all disks to the array.
+Starting an array commits all configuration changes like array creation, disk unassignments, additions or replacements to the array. Automatically imports all disks to the array.
 ```bash
 sudo nmdctl start/stop
 ```
@@ -104,14 +111,23 @@ Same assumption about disk partitioning and device naming as with `create`, and 
 sudo nmdctl add
 ```
 
+##### Replace a disk (interactive)
+
+Replaces a disk in the specified already unassigned slot with a new disk. The new disk must not already be assigned to the array, and it must be partitioned as described above.
+```bash
+sudo nmdctl replace SLOT
+```
+
 ##### Unassign a disk from a slot
+
+Unassigns a disk from the specified slot, effectively removing it from the array. Disk contents will be emulated from parity and other data disks when the array is started.
 ```bash
 sudo nmdctl unassign SLOT
 ```
 
 ##### Mount all data disks
 
-Mounts all detected unmounted filesystems to `MOUNTPREFIX` (default `/mnt/diskN`). ZFS pools are imported with their configured mountpoint. LUKS devices are opened with a key-file (global `--keyfile` option, default `/etc/nonraid/luks-keyfile`). Array needs to be started.
+Mounts all detected unmounted filesystems to `MOUNTPREFIX` (default `/mnt/diskN`). LUKS devices are opened with a key-file (global `--keyfile` option, default `/etc/nonraid/luks-keyfile`). Array needs to be started.
 ```bash
 sudo nmdctl mount [MOUNTPREFIX]
 ```
@@ -125,10 +141,16 @@ sudo nmdctl unmount
 
 ##### Start/stop a parity check
 
-This will also start reconstruction or clear operations depending on the array state.
+This will also start reconstruction or clear operations depending on the array state, user confirmation is required if a normal parity check is not being started. In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`).
 ```bash
-sudo nmdctl check/nocheck
+sudo nmdctl check/nocheck OPTION
 ```
+Where `OPTION` can be:
+- `CORRECT` - start a corrective parity check, this is the default if no option is given
+- `NOCORRECT` - start a check-only parity check, this is the default in unattended mode
+- `RESUME` - resume a previously started parity check
+- `CANCEL` - (for `nocheck`) cancel a running parity check
+- `PAUSE` - (for `nocheck`) pause a running parity check
 
 ##### Reload the nonraid module
 
@@ -153,10 +175,15 @@ It's important to understand that many things related to automatic detection etc
 
 While the `nmdctl` tool now automates many tasks, understanding the underlying driver interface is still valuable for troubleshooting or advanced usage.
 
+<details>
+
+<summary>Driver Interface Details</summary>
+
 ### Superblock file
 Array state is kept in a superblock file, that is stored outside the array and read by the driver when the driver module is loaded.
 
-> [!IMPORTANT]
+> **Important**
+>
 > Superblock filename must be given as kernel module parameter: `modprobe nonraid super=/nonraid.dat`
 
 Superblock file contains the array configuration, including which disk id is assigned to which slot, and what their state was at the time of last superblock update.
@@ -171,7 +198,8 @@ Guessing from the official docs, the "New Config" operation in the UnRAID system
 ### nmdcmd
 The driver is managed via procfs interface `/proc/nmdcmd`, see [docs/nmdcmd.8](docs/nmdcmd.8) for "man page". The documentation is LLM generated from the driver source code, but seems to be mostly correct.
 
-> [!TIP]
+> **Tip**
+>
 > You need to write commands to the `/proc/nmdcmd` file as root, so either do it from root shell or use `sudo sh -c 'echo "command" > /proc/nmdcmd'` (or `echo "command"|sudo tee /proc/nmdcmd`)
 >
 > Driver by default logs commands to dmesg, to see more output from the commands you can run: `echo "set md_trace 2" > /proc/nmdcmd`
@@ -228,7 +256,8 @@ echo "import 2 sdc1 0 10000000 0 VBOX_HARDDISK_VB9c8a60bc-22209161" > /proc/nmdc
 3. Check that all devices are correct in `/proc/nmdstat`, and then start the array: `echo "start" > /proc/nmdcmd`
    - If you missed importing any member, a custom patch to the driver will prevent the array from starting, as without it the kernel would have crashed
 
-> [!TIP]
+> **Tip**
+>
 > If you want to start the array with a missing disk, the slot must still be imported with empty device name and other parameters (unassigning a disk):
 >  ```
 > echo "import 2 '' 0 0 0 ''" > /proc/nmdcmd
@@ -239,26 +268,24 @@ echo "import 2 sdc1 0 10000000 0 VBOX_HARDDISK_VB9c8a60bc-22209161" > /proc/nmdc
 As the driver is not intended to be used manually, normally the UnRAID UI makes sure it doesn't do things which cause driver issues, but manually these are easy to run into:
 * Unassigning same slot twice increases disk missing counter twice, causing the array to enter TOO_MANY_MISSING_DISKS state - this requires driver reload to reset: `modprobe -r nonraid && modprobe nonraid super=/nonraid.dat` or `nmdctl reload`
 * Same goes for many other internal state counters - best practise seems to be to always reload the driver after a single array operation
-* `nmdctl` tries to handle these driver issues either automatically or by warning the user to reload the driver if an inconsistent state is detected
+
+`nmdctl` tries to handle these driver issues either automatically or by warning the user to reload the driver if an inconsistent state is detected
+
+</details>
 
 ## Caveats
-- This is just a forked open-source `md_unraid` driver for those who are interested in DIY - it simply handles the array and parity. You have to manually handle importing disks directly via the driver management interface, starting with the correct parameters, doing necessary reconstructions/checks, monitoring the array state from /proc/nmdstat etc.
-  - `nmdctl` tool can now be used to automate many of the basic array operations
-- You'll need to manually create filesystems on the nmd devices, and mount them, and add mergerfs yourself to combine them into a single mount point if that is desired
-- Driver is pretty finicky, and can easily crash the kernel if commands are given in wrong order or with wrong parameters - some custom patches are used to avoid most common crashes (like trying to start array without importing all disks)
-- It is easy to end up in an error state unassigning/reassigning disks, and trying to continue blindly often results in kernel panic - error states can usually be cleared by a driver reload and then trying imports again
+- This is a forked open-source `md_unraid` driver for DIY enthusiasts interested in the technology behind UnRAID storage arrays. While the `nmdctl` tool now provides a semi-user-friendly interface for common array operations (creating arrays, adding/replacing disks, mounting filesystems, etc.), this is still primarily aimed at advanced users comfortable with Linux command line.
+- The commercial UnRAID system offers a much more comprehensive solution with a polished web UI, plugins ecosystem, and virtualization features that this project doesn't aim to replicate.
+- You'll still need to manually handle some aspects like creating filesystems on the nmd devices and setting up mergerfs if you want to combine multiple disks into a single mount point.
+- While the `nmdctl` tool handles many error conditions, the underlying driver can still be finicky. Custom patches are used to avoid most common crashes (like trying to start the array without importing all disks).
+- If you encounter issues, please use the [project discussions](https://github.com/qvr/nonraid/discussions) for support rather than UnRAID forums, as this is an independent project.
 - Driver should be able to handle disks from an actual UnRAID system, but I have never used or installed UnRAID so I don't actually know
-  - Other way around, moving array created on this to UnRAID probably does NOT work, unless the disks have been partitioned exactly as UnRAID system expects them to be
+  - Other way around, moving array created on this to UnRAID _probably_ does not work, unless the disks have been partitioned exactly as UnRAID system expects them to be - if you can try it out, please report back!
 - This was done out of interest and for fun - no guarantees on how quickly upstream changes are synced, or if they are done at all
-- Really, you should probably just get UnRAID
+- For a complete, polished storage solution with support, you might want to still consider getting UnRAID
 
 ## Plans
 - Look into setting up a PPA for the dkms and tools packages, making updates easier
-- ~~Scripts to automate common array management tasks, like importing disks, starting arrays, etc.~~
-  - Initial implementation with `nmdctl` is now available
-- ~~Further `nmdctl` improvements, like detecting and mounting filesystems on nmd devices automatically~~
-  - `nmdctl` now supports detecting and mounting filesystems, even from inside LUKS devices
-- ~~systemd service definition to handle array start/stop~~
 - **IF** we decide to diverge further from the upstream, the module should be fairly simple to modify to build on multiple kernel versions, so that we dont have to ship multiple versions of the module code for different kernel versions (and we would be able to support 6.9 and 6.10 kernels too) - currently not planned though
 
 ## License

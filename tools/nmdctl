@@ -1490,20 +1490,9 @@ list_available_devices() {
                 continue  # Skip if we can't find the partition
             fi
 
-            # Get device details
+            # Get disk id
             local disk_id=""
-            if [ -d "/dev/disk/by-id" ]; then
-                local dev_name=$(basename "$dev")
-                for id_path in /dev/disk/by-id/*; do
-                    if [ -L "$id_path" ] && [[ "$id_path" != *-part* ]]; then
-                        local link_target=$(readlink -f "$id_path")
-                        if [ "$(basename "$link_target")" = "$dev_name" ]; then
-                            disk_id=$(basename "$id_path")
-                            break
-                        fi
-                    fi
-                done
-            fi
+            disk_id=$(udevadm info --query=property --property=ID_SERIAL --value --name="$dev" 2>/dev/null)
 
             # Get disk size information
             local size_kb=$(get_disk_size_kb "$partition")

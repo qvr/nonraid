@@ -976,7 +976,7 @@ get_fs_usage() {
             # For ZFS, we need to use zfs command to get usage
             if command -v zfs >/dev/null 2>&1; then
                 # Extract pool/dataset name from the mountpoint
-                local dataset=$(zfs list -H -o name,mountpoint | grep "[[:space:]]$mountpoint$" | awk '{print $1}' | head -1)
+                local dataset=$(zfs list -H -o name "$mountpoint" 2>/dev/null)
                 if [ -n "$dataset" ]; then
                     # Use zfs get to get the percentage directly
                     local usage=$(zpool list -H -o cap "$dataset" 2>/dev/null)

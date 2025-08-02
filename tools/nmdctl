@@ -1473,12 +1473,7 @@ list_available_devices() {
     local devices=()
 
     # Find all disk devices
-    for dev in /dev/sd*; do
-        # Skip if not a block device or if it's a partition
-        if [ ! -b "$dev" ] || [[ "$dev" == *[0-9] ]]; then
-            continue
-        fi
-
+    for dev in $(lsblk -n -d -I 8 -o path 2>/dev/null); do
         # Check if the device has exactly one partition
         local partition_count=$(grep -c "$(basename "${dev}")[0-9]" /proc/partitions)
         if [ "$partition_count" -eq 1 ]; then
@@ -1488,6 +1483,11 @@ list_available_devices() {
                 partition="${dev}1"
             else
                 continue  # Skip if we can't find the partition
+            fi
+
+            # Skip if partition is already mounted
+            if grep -q -w "$partition" /proc/mounts 2>/dev/null; then
+                continue
             fi
 
             # Get disk id

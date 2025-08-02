@@ -127,7 +127,7 @@ sudo nmdctl unassign SLOT
 
 ##### Mount all data disks
 
-Mounts all detected unmounted filesystems to `MOUNTPREFIX` (default `/mnt/diskN`). LUKS devices are opened with a key-file (global `--keyfile` option, default `/etc/nonraid/luks-keyfile`). Array needs to be started.
+Mounts all detected unmounted filesystems to `MOUNTPREFIX` (default `/mnt/diskN`). LUKS devices are opened with a key-file (global `--keyfile` option, default `/etc/nonraid/luks-keyfile`).
 ```bash
 sudo nmdctl mount [MOUNTPREFIX]
 ```

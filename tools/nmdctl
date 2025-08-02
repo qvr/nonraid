@@ -2651,9 +2651,8 @@ unmount_array_disks() {
 
     local mdstate="${NMDSTAT_VALUES[mdState]}"
     if [ "$mdstate" != "STARTED" ]; then
-        echo -e "${RED}Error: Array must be started to unmount disks${NC}"
-        echo -e "Current array state: $mdstate"
-        return 1
+        echo -e "${YELLOW}Array is not running (current state: $mdstate)${NC}"
+        return 0
     fi
 
     echo "=== Unmounting NonRAID Array Disks ==="

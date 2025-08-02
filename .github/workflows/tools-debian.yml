@@ -70,10 +70,6 @@ jobs:
             # Get commits since the last nonraid-tools tag
             COMMITS=$(git log ${LAST_TOOLS_TAG}..HEAD --pretty=format:"- %s (%h)" -- tools/)
           fi
-          # Escape newlines for GitHub Actions output
-          COMMITS="${COMMITS//'%'/'%25'}"
-          COMMITS="${COMMITS//$'\n'/'%0A'}"
-          COMMITS="${COMMITS//$'\r'/'%0D'}"
           echo "commits<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT

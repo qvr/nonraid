@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.5.0
+VERSION=1.5.1
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -1351,10 +1351,13 @@ stop_array() {
     local unmount_needed=0
     # Check if we need to unmount any filesystems before stopping
     for slot in $(get_defined_slots); do
+        if [ "$slot" -eq 0 ] || [ "$slot" -eq 29 ]; then
+            continue
+        fi
         local diskname="${NMDSTAT_VALUES["diskName.$slot"]}"
         local fs_type=$(get_fs_type "$diskname")
         local current_mountpoint=$(get_mountpoint "$diskname" "$fs_type")
-        if [ -n "$current_mountpoint" ]; then
+        if [ -n "$current_mountpoint" ] && [ "$current_mountpoint" != "unmounted" ]; then
             unmount_needed=1
             break
         fi

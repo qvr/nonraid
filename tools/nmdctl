@@ -2330,7 +2330,7 @@ unassign_disk() {
     # Check if other slots are already unassigned
     for check_slot in $(get_defined_slots); do
         local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$check_slot]}"
-        if [ -n "$rdevstatus" ] && ( [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ] ); then
+        if [ -n "$rdevstatus" ] && { [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ]; }; then
             unassigned_disks=$((unassigned_disks + 1))
         fi
     done

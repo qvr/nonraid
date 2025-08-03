@@ -1025,14 +1025,17 @@ get_disk_size_kb() {
     return 1
 }
 
-# Find partition for a given disk device
+# Find an unused largest partition for a given disk device
 find_partition() {
     local dev="$1"
     #           list partitions | sort by size | largest last | use if no mountpoint
-    partition=$(lsblk -o path,size,mountpoint -b -n "$dev" | grep -v -w "$dev" | sort -k2 -n | tail -1 | awk '{ if($3 == "") print $1}')
+    partition=$(lsblk -bpno kname,size,mountpoint "$dev" | grep -v -w "$dev" |grep "$dev" | sort -k2 -n | tail -1 | awk '{ if($3 == "") print $1}')
     if [ -n "$partition" ] && [ -b "$partition" ]; then
-        echo "$partition"
-        return 0
+        # check if partition is a parent for some other block device (like LVM)
+        if ! lsblk -pno pkname "$partition" | grep -q -w "$partition"; then
+            echo "$partition"
+            return 0
+        fi
     fi
     return 1
 }

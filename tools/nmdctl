@@ -1024,6 +1024,18 @@ get_disk_size_kb() {
     return 1
 }
 
+# Find partition for a given disk device
+find_partition() {
+    local dev="$1"
+    #           list partitions | sort by size | largest last | use if no mountpoint
+    partition=$(lsblk -o path,size,mountpoint -b -n "$dev" | grep -v -w "$dev" | sort -k2 -n | tail -1 | awk '{ if($3 == "") print $1}')
+    if [ -n "$partition" ] && [ -b "$partition" ]; then
+        echo "$partition"
+        return 0
+    fi
+    return 1
+}
+
 # Find disk device name matching the ID in nmdstat
 find_matching_disk() {
     local disk_id="$1"
@@ -1100,14 +1112,10 @@ import_disks() {
             found_device=$(find_matching_disk "$disk_id")
         fi
 
-        # Check if device exists and has a first partition
+        # Check if device exists and has an available partition
         local partition=""
         if [ -n "$found_device" ]; then
-            # Check for partitions
-            if [ -b "${found_device}1" ]; then
-                partition="${found_device}1"
-            fi
-
+            partition="$(find_partition "$found_device")"
             if [ -n "$partition" ]; then
                 # Get the partition size
                 local disk_size=$(get_disk_size_kb "$partition")
@@ -1472,22 +1480,9 @@ list_available_devices() {
 
     # Find all disk devices
     for dev in $(lsblk -n -d -I 8 -o path 2>/dev/null); do
-        # Check if the device has exactly one partition
-        local partition_count=$(grep -c "$(basename "${dev}")[0-9]" /proc/partitions)
-        if [ "$partition_count" -eq 1 ]; then
-            # Get the partition device
-            local partition=""
-            if [ -b "${dev}1" ]; then
-                partition="${dev}1"
-            else
-                continue  # Skip if we can't find the partition
-            fi
-
-            # Skip if partition is already mounted
-            if grep -q -w "$partition" /proc/mounts 2>/dev/null; then
-                continue
-            fi
-
+        # Find partition, largest on the disk and must not be mounted
+        local partition=$(find_partition "$dev")
+        if [ -n "$partition" ]; then
             # Get disk id
             local disk_id=""
             disk_id=$(udevadm info --query=property --property=ID_SERIAL --value --name="$dev" 2>/dev/null)

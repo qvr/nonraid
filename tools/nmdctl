@@ -1031,10 +1031,21 @@ find_partition() {
     #           list partitions | sort by size | largest last | use if no mountpoint
     partition=$(lsblk -bpno kname,size,mountpoint "$dev" | grep -v -w "$dev" |grep "$dev" | sort -k2 -n | tail -1 | awk '{ if($3 == "") print $1}')
     if [ -n "$partition" ] && [ -b "$partition" ]; then
-        # check if partition is a parent for some other block device (like LVM)
+        # Check if partition is a parent for some other block device (like LVM)
         if ! lsblk -pno pkname "$partition" | grep -q -w "$partition"; then
-            echo "$partition"
-            return 0
+            # If python is available, check if we can get exclusive lock on the block device
+            # This should detect use by for example zfs
+            local dev_locked=0
+            if command -v python3 >/dev/null 2>&1; then
+                if ! python3 -c "import os; os.open('$partition', os.O_WRONLY|os.O_EXCL)" 2>/dev/null; then
+                    dev_locked=1
+                fi
+            fi
+            if [ "$dev_locked" -eq 0 ]; then
+                # If python is not available or device was not locked, return the partition
+                echo "$partition"
+                return 0
+            fi
         fi
     fi
     return 1

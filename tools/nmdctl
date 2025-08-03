@@ -1475,7 +1475,7 @@ stop_check() {
     return 0
 }
 
-# List available block devices with single partitions
+# List available block devices with an unused largest partition
 list_available_devices() {
     local devices=()
 
@@ -1567,7 +1567,7 @@ create_array() {
     echo -e "=== ${BLUE}Creating New NonRAID Array${NC} ==="
     echo ""
     echo -e "${YELLOW}This will create a new array and assign disks to slots.${NC}"
-    echo -e "${YELLOW}Only devices with a single partition will be shown.${NC}"
+    echo -e "${YELLOW}Only devices with an unused largest partition will be shown.${NC}"
     echo ""
 
     # Get available devices
@@ -1576,7 +1576,7 @@ create_array() {
 
     if [ ${#available_devices[@]} -eq 0 ]; then
         echo -e "${RED}Error: No suitable disk devices found${NC}"
-        echo -e "${YELLOW}Make sure disks are connected and have a single partition${NC}"
+        echo -e "${YELLOW}Make sure disks are connected and are partitioned correctly${NC}"
         return 1
     fi
 
@@ -1889,7 +1889,7 @@ add_disk() {
     echo ""
     echo -e "${YELLOW}This will add a single new disk to the array.${NC}"
     echo -e "${YELLOW}After adding the disk, you must start the array to process it.${NC}"
-    echo -e "${YELLOW}Only devices with a single partition will be shown.${NC}"
+    echo -e "${YELLOW}Only devices with an unused largest partition will be shown.${NC}"
     echo ""
 
     # Get available devices
@@ -1898,7 +1898,7 @@ add_disk() {
 
     if [ ${#all_available_devices[@]} -eq 0 ]; then
         echo -e "${RED}Error: No suitable disk devices found${NC}"
-        echo -e "${YELLOW}Make sure disks are connected and have a single partition${NC}"
+        echo -e "${YELLOW}Make sure disks are connected and are partitioned correctly${NC}"
         return 1
     fi
 
@@ -1951,7 +1951,7 @@ add_disk() {
         if [ $filtered_count -gt 0 ]; then
             echo -e "${YELLOW}Found $filtered_count disk(s), but all are already part of the array${NC}"
         else
-            echo -e "${YELLOW}Make sure disks are connected and have a single partition${NC}"
+            echo -e "${YELLOW}Make sure disks are connected and are partitioned correctly${NC}"
         fi
         return 1
     fi

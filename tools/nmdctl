@@ -141,7 +141,8 @@ check_module_loaded() {
         echo -e "${RED}Error: nonraid module is not loaded${NC}"
         echo -e "Superblock file not found: $superblock"
         echo -e "To create an array with this new superblock, run: ${YELLOW}nmdctl --super $superblock create${NC}"
-        return 1
+        # exit early, but cleanly
+        exit 0
     fi
 }
 

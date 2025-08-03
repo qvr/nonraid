@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.6.0
+VERSION=1.6.1
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -1025,14 +1025,28 @@ get_disk_size_kb() {
     return 1
 }
 
-# Find partition for a given disk device
+# Find an unused largest partition for a given disk device
 find_partition() {
     local dev="$1"
     #           list partitions | sort by size | largest last | use if no mountpoint
-    partition=$(lsblk -o path,size,mountpoint -b -n "$dev" | grep -v -w "$dev" | sort -k2 -n | tail -1 | awk '{ if($3 == "") print $1}')
+    partition=$(lsblk -bpno kname,size,mountpoint "$dev" | grep -v -w "$dev" |grep "$dev" | sort -k2 -n | tail -1 | awk '{ if($3 == "") print $1}')
     if [ -n "$partition" ] && [ -b "$partition" ]; then
-        echo "$partition"
-        return 0
+        # Check if partition is a parent for some other block device (like LVM)
+        if ! lsblk -pno pkname "$partition" | grep -q -w "$partition"; then
+            # If python is available, check if we can get exclusive lock on the block device
+            # This should detect use by for example zfs
+            local dev_locked=0
+            if command -v python3 >/dev/null 2>&1; then
+                if ! python3 -c "import os; os.open('$partition', os.O_WRONLY|os.O_EXCL)" 2>/dev/null; then
+                    dev_locked=1
+                fi
+            fi
+            if [ "$dev_locked" -eq 0 ]; then
+                # If python is not available or device was not locked, return the partition
+                echo "$partition"
+                return 0
+            fi
+        fi
     fi
     return 1
 }
@@ -1475,7 +1489,7 @@ stop_check() {
     return 0
 }
 
-# List available block devices with single partitions
+# List available block devices with an unused largest partition
 list_available_devices() {
     local devices=()
 
@@ -1567,7 +1581,7 @@ create_array() {
     echo -e "=== ${BLUE}Creating New NonRAID Array${NC} ==="
     echo ""
     echo -e "${YELLOW}This will create a new array and assign disks to slots.${NC}"
-    echo -e "${YELLOW}Only devices with a single partition will be shown.${NC}"
+    echo -e "${YELLOW}Only devices with an unused largest partition will be shown.${NC}"
     echo ""
 
     # Get available devices
@@ -1576,7 +1590,7 @@ create_array() {
 
     if [ ${#available_devices[@]} -eq 0 ]; then
         echo -e "${RED}Error: No suitable disk devices found${NC}"
-        echo -e "${YELLOW}Make sure disks are connected and have a single partition${NC}"
+        echo -e "${YELLOW}Make sure disks are connected and are partitioned correctly${NC}"
         return 1
     fi
 
@@ -1889,7 +1903,7 @@ add_disk() {
     echo ""
     echo -e "${YELLOW}This will add a single new disk to the array.${NC}"
     echo -e "${YELLOW}After adding the disk, you must start the array to process it.${NC}"
-    echo -e "${YELLOW}Only devices with a single partition will be shown.${NC}"
+    echo -e "${YELLOW}Only devices with an unused largest partition will be shown.${NC}"
     echo ""
 
     # Get available devices
@@ -1898,7 +1912,7 @@ add_disk() {
 
     if [ ${#all_available_devices[@]} -eq 0 ]; then
         echo -e "${RED}Error: No suitable disk devices found${NC}"
-        echo -e "${YELLOW}Make sure disks are connected and have a single partition${NC}"
+        echo -e "${YELLOW}Make sure disks are connected and are partitioned correctly${NC}"
         return 1
     fi
 
@@ -1951,7 +1965,7 @@ add_disk() {
         if [ $filtered_count -gt 0 ]; then
             echo -e "${YELLOW}Found $filtered_count disk(s), but all are already part of the array${NC}"
         else
-            echo -e "${YELLOW}Make sure disks are connected and have a single partition${NC}"
+            echo -e "${YELLOW}Make sure disks are connected and are partitioned correctly${NC}"
         fi
         return 1
     fi
@@ -2012,8 +2026,8 @@ add_disk() {
 
     echo -e "Available devices:"
     echo ""
-    echo -e "  #  Device      Size(GB)  ID"
-    echo -e "  -  ----------  --------  ---------------------------------"
+    echo -e "  #   Device      Size(GB)  ID"
+    echo -e "  --  ----------  --------  ---------------------------------"
 
     local device_index=1
     for device_info in "${available_devices[@]}"; do
@@ -2021,8 +2035,8 @@ add_disk() {
 
         # Show shortened disk ID for clarity
         local short_id="${disk_id}"
-        if [ ${#short_id} -gt 25 ]; then
-            short_id="${short_id:0:22}..."
+        if [ ${#short_id} -gt 33 ]; then
+            short_id="${short_id:0:30}..."
         fi
 
         printf "  %-2d  %-10s  %-8s  %s\n" \

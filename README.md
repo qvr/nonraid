@@ -69,11 +69,13 @@ Exits with an error code if there are any issues with the array, so this can be 
 
 ##### Create a new array (interactive)
 
-This makes assumptions that the disks are already partitioned to have a single partition and their device name matches `/dev/sd*`. You can partition the disk with the command `sudo sgdisk -o -a 8 -n 1:32K:0 /dev/sdX` (this will create a new partition table on the disk, so be careful to use the correct disk).
+This assumes that the disks are already partitioned - the largest (unused) partition will be shown as an option to add to the array.
+
+You can partition the disks with the command `sudo sgdisk -o -a 8 -n 1:32K:0 /dev/sdX` (this will create a new partition table on the disk, so be careful to use the correct disk).
 ```bash
 sudo nmdctl create
 ```
-Once the array is started, the nmd devices will be available as `/dev/nmdXp1`, where `X` is the slot number. They can then be formatted with your desired filesystem (XFS, BTRFS, ZFS, etc.) and mounted.
+Once the array is started, the nmd devices will be available as `/dev/nmdXp1`, where `X` is the slot number. They can then be formatted with your desired filesystem (XFS, BTRFS, ZFS, etc.) and mounted (manually, or with `nmdctl mount`).
 > [!IMPORTANT]
 > If you are using ZFS, make sure there is no service (like `zfs-import-cache.service`) which can automatically import the ZFS pool(s) from raw `/dev/sdX` devices on boot, as this will cause the NonRAID parity to **silently** become invalid requiring a corrective parity check (`nmdctl check`). `nmdctl mount` imports ZFS pools with the option `cachefile=none` to avoid this particular `zfs-import-cache` issue.
 >
@@ -106,7 +108,7 @@ sudo nmdctl import
 
 ##### Add a new disk (interactive)
 
-Same assumption about disk partitioning and device naming as with `create`, and the disk must not already be assigned to the array. Only one disk can be added at a time.
+Disk must already be partitioned as with `create`, and the disk must not already be assigned to the array. Only one disk can be added at a time.
 ```bash
 sudo nmdctl add
 ```

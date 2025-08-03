@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.5.1
+VERSION=1.6.0
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -141,7 +141,8 @@ check_module_loaded() {
         echo -e "${RED}Error: nonraid module is not loaded${NC}"
         echo -e "Superblock file not found: $superblock"
         echo -e "To create an array with this new superblock, run: ${YELLOW}nmdctl --super $superblock create${NC}"
-        return 1
+        # exit early, but cleanly
+        exit 0
     fi
 }
 
@@ -1024,6 +1025,18 @@ get_disk_size_kb() {
     return 1
 }
 
+# Find partition for a given disk device
+find_partition() {
+    local dev="$1"
+    #           list partitions | sort by size | largest last | use if no mountpoint
+    partition=$(lsblk -o path,size,mountpoint -b -n "$dev" | grep -v -w "$dev" | sort -k2 -n | tail -1 | awk '{ if($3 == "") print $1}')
+    if [ -n "$partition" ] && [ -b "$partition" ]; then
+        echo "$partition"
+        return 0
+    fi
+    return 1
+}
+
 # Find disk device name matching the ID in nmdstat
 find_matching_disk() {
     local disk_id="$1"
@@ -1100,16 +1113,10 @@ import_disks() {
             found_device=$(find_matching_disk "$disk_id")
         fi
 
-        # Check if device exists and has a first partition
+        # Check if device exists and has an available partition
         local partition=""
         if [ -n "$found_device" ]; then
-            # Check for partitions
-            if [ -b "${found_device}1" ]; then
-                partition="${found_device}1"
-            elif [ -b "${found_device}p1" ]; then
-                partition="${found_device}p1"
-            fi
-
+            partition="$(find_partition "$found_device")"
             if [ -n "$partition" ]; then
                 # Get the partition size
                 local disk_size=$(get_disk_size_kb "$partition")
@@ -1473,37 +1480,13 @@ list_available_devices() {
     local devices=()
 
     # Find all disk devices
-    for dev in /dev/sd*; do
-        # Skip if not a block device or if it's a partition
-        if [ ! -b "$dev" ] || [[ "$dev" == *[0-9] ]]; then
-            continue
-        fi
-
-        # Check if the device has exactly one partition
-        local partition_count=$(grep -c "$(basename "${dev}")[0-9]" /proc/partitions)
-        if [ "$partition_count" -eq 1 ]; then
-            # Get the partition device
-            local partition=""
-            if [ -b "${dev}1" ]; then
-                partition="${dev}1"
-            else
-                continue  # Skip if we can't find the partition
-            fi
-
-            # Get device details
+    for dev in $(lsblk -n -d -I 8 -o path 2>/dev/null); do
+        # Find partition, largest on the disk and must not be mounted
+        local partition=$(find_partition "$dev")
+        if [ -n "$partition" ]; then
+            # Get disk id
             local disk_id=""
-            if [ -d "/dev/disk/by-id" ]; then
-                local dev_name=$(basename "$dev")
-                for id_path in /dev/disk/by-id/*; do
-                    if [ -L "$id_path" ] && [[ "$id_path" != *-part* ]]; then
-                        local link_target=$(readlink -f "$id_path")
-                        if [ "$(basename "$link_target")" = "$dev_name" ]; then
-                            disk_id=$(basename "$id_path")
-                            break
-                        fi
-                    fi
-                done
-            fi
+            disk_id=$(udevadm info --query=property --property=ID_SERIAL --value --name="$dev" 2>/dev/null)
 
             # Get disk size information
             local size_kb=$(get_disk_size_kb "$partition")
@@ -2257,7 +2240,7 @@ unassign_disk() {
 
     # Check if array is stopped
     local mdstate="${NMDSTAT_VALUES[mdState]}"
-    if [ "$mdstate" != "STOPPED" ]; then
+    if [ "$mdstate" = "STARTED" ]; then
         echo -e "${RED}Error: Array must be stopped before unassigning disks${NC}"
         echo -e "Stop the array with: ${YELLOW}nmdctl stop${NC}"
         return 1
@@ -2328,22 +2311,26 @@ unassign_disk() {
         echo ""
     fi
 
-    echo -e "Unassigning disk from slot $slot_display..."
-
-    local reload_done=0
-    # If any slots are currently imported, we need to reload driver before unassigning
+    local unassigned_disks=0
+    local parity_count=0
+    # Check if other slots are already unassigned
     for check_slot in $(get_defined_slots); do
-        local check_rdev_name="${NMDSTAT_VALUES[rdevName.$check_slot]}"
-        if [ -n "$check_rdev_name" ] && [ "$check_rdev_name" != "none" ]; then
-            echo -e "${YELLOW}Slot(s) already imported, reloading nonraid module first to unassign disk...${NC}"
-            if ! reload_module 1; then
-                echo -e "${RED}Error: Failed to reload nonraid module${NC}"
-                return 1
-            fi
-            reload_done=1
-            break
+        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$check_slot]}"
+        if [ -n "$rdevstatus" ] && ( [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ] ); then
+            unassigned_disks=$((unassigned_disks + 1))
         fi
     done
+    [ "${NMDSTAT_VALUES[diskSize.0]}" -gt 0 ] && parity_count=$((parity_count + 1))
+    [ "${NMDSTAT_VALUES[diskSize.29]}" -gt 0 ] && parity_count=$((parity_count + 1))
+
+    if [ "$((unassigned_disks+1))" -gt "$parity_count" ]; then
+        echo -e "${RED}Error: Parity count in array does not allow unassigning more disks${NC}"
+        echo -e "${YELLOW}You can only unassign disks if there are enough parity disks to maintain data integrity.${NC}"
+        echo -e "${YELLOW}Current parity count: $parity_count, unassigned disks: $unassigned_disks${NC}"
+        return 1
+    fi
+
+    echo -e "Unassigning disk from slot $slot_display..."
 
     # Unassign the disk by importing an empty device
     if ! run_nmd_command "import $slot '' 0 0 0 ''"; then
@@ -2353,11 +2340,6 @@ unassign_disk() {
 
     echo -e "${GREEN}Successfully unassigned disk from slot $slot_display${NC}"
     echo ""
-
-    if [ "$reload_done" -eq 1 ]; then
-        echo -e "${YELLOW}Module reload was done, importing back rest of the disks.${NC}"
-        import_disks 1
-    fi
 
     # Show array status
     show_status
@@ -2651,9 +2633,8 @@ unmount_array_disks() {
 
     local mdstate="${NMDSTAT_VALUES[mdState]}"
     if [ "$mdstate" != "STARTED" ]; then
-        echo -e "${RED}Error: Array must be started to unmount disks${NC}"
-        echo -e "Current array state: $mdstate"
-        return 1
+        echo -e "${YELLOW}Array is not running (current state: $mdstate)${NC}"
+        return 0
     fi
 
     echo "=== Unmounting NonRAID Array Disks ==="

@@ -2026,8 +2026,8 @@ add_disk() {
 
     echo -e "Available devices:"
     echo ""
-    echo -e "  #  Device      Size(GB)  ID"
-    echo -e "  -  ----------  --------  ---------------------------------"
+    echo -e "  #   Device      Size(GB)  ID"
+    echo -e "  --  ----------  --------  ---------------------------------"
 
     local device_index=1
     for device_info in "${available_devices[@]}"; do
@@ -2035,8 +2035,8 @@ add_disk() {
 
         # Show shortened disk ID for clarity
         local short_id="${disk_id}"
-        if [ ${#short_id} -gt 25 ]; then
-            short_id="${short_id:0:22}..."
+        if [ ${#short_id} -gt 33 ]; then
+            short_id="${short_id:0:30}..."
         fi
 
         printf "  %-2d  %-10s  %-8s  %s\n" \

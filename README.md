@@ -14,52 +14,62 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 >
 > Use at your own risk, and always have backups!
 
-## Installation
-**Kernel support matrix**
+
+## Kernel support matrix
 
 | Kernel range  | NonRAID module branch | Upstream base | Tested distros | Notes |
 | ------------- | --------------------- | ------------- | -------------- | ------ |
-| 6.1 - 6.4 | [nonraid-6.1](https://github.com/qvr/nonraid/tree/nonraid-6.1) | 6.1.126-Unraid | Debian 12 | Contains fixes backported from 6.6 branch |
-| 6.5 - 6.8 | [nonraid-6.6](https://github.com/qvr/nonraid/tree/nonraid-6.6) | 6.6.78-Unraid | Ubuntu 24.04 LTS GA kernel | No functional difference to 6.12 branch |
-| 6.11 - 6.14 | [nonraid-6.12](https://github.com/qvr/nonraid/tree/nonraid-6.12) | 6.12.24-Unraid | Ubuntu 24.04 LTS HWE kernel | |
+| 6.1 - 6.4 | [nonraid-6.1](https://github.com/qvr/nonraid/tree/nonraid-6.1) | unRAID 6.12.15 (6.1.126-Unraid) | Debian 12 | Contains fixes backported from 6.6 branch |
+| 6.5 - 6.8 | [nonraid-6.6](https://github.com/qvr/nonraid/tree/nonraid-6.6) | unRAID 7.0.1 (6.6.78-Unraid) | Ubuntu 24.04 LTS GA kernel | No functional difference to 6.12 branch |
+| 6.11 - 6.14 | [nonraid-6.12](https://github.com/qvr/nonraid/tree/nonraid-6.12) | unRAID 7.1.2 (6.12.24-Unraid) | Ubuntu 24.04 LTS HWE kernel | |
 
 The supported kernel version ranges might be inaccurate, the driver has been tested to work on **Ubuntu 24.04 LTS** GA kernel (6.8.0) and HWE kernels (6.11 and 6.14) and on **Debian 12** (6.1). Note that kernel versions 6.9 and 6.10 are not supported. You can report other distributions and kernel versions that work in the [discussions](https://github.com/qvr/nonraid/discussions).
 
 > [!NOTE]
 > Ubuntu 24.04 LTS HWE kernel users should be aware that future HWE kernel version changes might include kernel ABI changes that could cause the driver to stop working until an update is released.
 
-For Ubuntu/Debian based systems, download the latest kernel module [dkms package from releases](https://github.com/qvr/nonraid/releases?q=nonraid+dkms), and install it and the prerequisites:
-```
+## Installation
+
+For Ubuntu/Debian based systems, download and install both the kernel module and management tools:
+
+1. Download the latest packages from separate releases:
+   - [DKMS kernel module package](https://github.com/qvr/nonraid/releases?q=nonraid+dkms)
+   - [Management tools package](https://github.com/qvr/nonraid/releases?q=nonraid+tools)
+
+2. Install the prerequisites and both packages:
+```bash
+# Install prerequisites
 sudo apt install dkms linux-headers-$(uname -r) build-essential
-sudo apt install ./nonraid-dkms_*.deb
-# check that the dkms module is installed
+
+# Install the DKMS module and management tools
+sudo apt install ./nonraid-dkms_*.deb ./nonraid-tools_*.deb
+
+# Verify the DKMS module installation
 sudo dkms status
+
+# Update the initramfs to include the patched raid6_pq module
 sudo update-initramfs -u -k all
 ```
+
 > [!NOTE]
 > Updating the initramfs is needed to make sure the new `raid6_pq` module is used, as otherwise the unpatched module gets loaded by other modules depending on it during initramfs, at least on Ubuntu 24.04. Future kernel upgrades should automatically rebuild the DKMS module, and update the initramfs.
 
-Reboot, and load the nonraid driver (`modprobe nonraid super=/nonraid.dat`) and you should have the nonraid driver interface `/proc/nmdcmd` available. You can then use the included `nmdctl` tool for array management, or interact with the driver directly.
+3. Reboot your system. After rebooting, you can start using NonRAID by creating a new array with the command:
+
+```bash
+sudo nmdctl create
+```
+
+This [nmdctl](#array-management) command will load the NonRAID driver module and guide you through array creation. Once the array is created, the included [systemd service](tools/systemd/nonraid.service) will automatically start the array and mount the disks on subsequent system boots.
 
 > [!TIP]
-> `/nonraid.dat` is the default location for the superblock file used by the `nmdctl` tool. The superblock file is stored outside of the array disks. You can specify a different superblock file location with the `-s` option, as explained in the "Using a custom superblock file location" section below.
+> `/nonraid.dat` is the default location for the superblock file used by the `nmdctl` tool. The superblock file contains the array configuration and is stored outside of the array disks. You can specify a different superblock file location with the `-s` option, as explained in the "Using a custom superblock file location" section below.
 
 ## Array Management
 
-### Using nmdctl (NonRAID Management Tool)
-The project now includes a management tool called `nmdctl` that automates common NonRAID array operations, making it easier to manage the array without using the raw driver interface.
+The command line [nmdctl tool](tools/nmdctl) handles common NonRAID array operations, making it easier to manage the array without using the [raw driver interface](#manual-management-using-driver-interface).
 
-#### Installation
-The nmdctl script is located in the `tools/` directory. It's also available as a deb package, download [the latest version from releases](https://github.com/qvr/nonraid/releases?q=nonraid+tools) and install it:
-
-```bash
-sudo apt install ./nonraid-tools_*.deb
-```
-The deb package will also install a [systemd service file](tools/systemd/nonraid.service) that handles starting the NonRAID array on boot and mounting all data disks.
-
-#### Common operations
-
-##### Display array status
+### Display array status
 
 Displays the status of the array and individual disks. Displays detected filesystems, mountpoints and filesystem usage. Drive ID's are also displayed if global `--verbose` option is set.
 ```bash
@@ -67,7 +77,7 @@ sudo nmdctl status
 ```
 Exits with an error code if there are any issues with the array, so this can be used as a simple monitoring in a cronjob. (Global `--no-color` option disables `nmdctl` colored ouput, making it more suitable for cron emails.)
 
-##### Create a new array (interactive)
+### Create a new array (interactive)
 
 This assumes that the disks are already partitioned - the largest (unused) partition will be shown as an option to add to the array.
 
@@ -83,14 +93,14 @@ Once the array is started, the nmd devices will be available as `/dev/nmdXp1`, w
 >
 > One way to avoid this is to use LUKS encryption on the NonRAID disks, which prevents OS services from detecting the filesystems on raw devices at all.
 
-###### "New Config" mode
+#### "New Config" mode
 If you want to change the array topology, like adding or removing disks, you can use the "New Config" mode. This is similar to the UnRAID "New Config" operation, and it allows you to start with a fresh array configuration without needing to recreate the configuration completely from scratch. If a disk to be removed disk is first zeroed **properly**, then you can optionally mark the parity valid for the newly created config to skip the parity reconstruction.
 ```bash
 sudo nmdctl create
 ```
 This will detect an existing array configuration, and prompt you to confirm that you want to create a new array configuration. Old superblock file will be renamed to `/nonraid.dat.bak` (default path), and a new superblock file will be created. When assigning disks to slots, the old slot assignment is given as an option.
 
-##### Start/stop the array
+### Start/stop the array
 
 Starting an array commits all configuration changes like array creation, disk unassignments, additions or replacements to the array. Automatically imports all disks to the array.
 ```bash
@@ -99,49 +109,49 @@ sudo nmdctl start/stop
 > [!NOTE]
 > If you are trying to start/import an existing UnRAID array, and you get an warning about size mismatch between detected and configured partition size, do not continue the import, but open an issue with details.
 
-##### Import all disks to the array without starting
+### Import all disks to the array without starting
 
 Useful if you want to add a new disk which needs to be done before starting the array.
 ```bash
 sudo nmdctl import
 ```
 
-##### Add a new disk (interactive)
+### Add a new disk (interactive)
 
 Disk must already be partitioned as with `create`, and the disk must not already be assigned to the array. Only one disk can be added at a time.
 ```bash
 sudo nmdctl add
 ```
 
-##### Replace a disk (interactive)
+### Replace a disk (interactive)
 
 Replaces a disk in the specified already unassigned slot with a new disk. The new disk must not already be assigned to the array, and it must be partitioned as described above.
 ```bash
 sudo nmdctl replace SLOT
 ```
 
-##### Unassign a disk from a slot
+### Unassign a disk from a slot
 
 Unassigns a disk from the specified slot, effectively removing it from the array. Disk contents will be emulated from parity and other data disks when the array is started.
 ```bash
 sudo nmdctl unassign SLOT
 ```
 
-##### Mount all data disks
+### Mount all data disks
 
 Mounts all detected unmounted filesystems to `MOUNTPREFIX` (default `/mnt/diskN`). LUKS devices are opened with a key-file (global `--keyfile` option, default `/etc/nonraid/luks-keyfile`).
 ```bash
 sudo nmdctl mount [MOUNTPREFIX]
 ```
 
-##### Unmount all data disks
+### Unmount all data disks
 
 Unmounts all detected mounted filesystems. LUKS devices are closed after filesystem unmount.
 ```bash
 sudo nmdctl unmount
 ```
 
-##### Start/stop a parity check
+### Start/stop a parity check
 
 This will also start reconstruction or clear operations depending on the array state, user confirmation is required if a normal parity check is not being started. In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`).
 ```bash
@@ -154,7 +164,7 @@ Where `OPTION` can be:
 - `CANCEL` - (for `nocheck`) cancel a running parity check
 - `PAUSE` - (for `nocheck`) pause a running parity check
 
-##### Reload the nonraid module
+### Reload the nonraid module
 
 Reloads the driver module with the specified superblock path. This is can be used to recover from error states or when changing superblock files.
 ```bash
@@ -162,7 +172,7 @@ sudo nmdctl reload
 ```
 This command effectively does `modprobe -r nonraid && modprobe nonraid super=/nonraid.dat` and is sometimes necessary to reset the driver's internal state after operations like unassigning disks or initial array creation.
 
-#### Using a custom superblock file location
+### Using a custom superblock file location
 Commands will load the driver module automatically if it is not loaded already, and the tool defaults to using `/nonraid.dat` as the superblock file path. To use a different location:
 ```bash
 sudo nmdctl -s /path/to/superblock.dat reload
@@ -170,7 +180,7 @@ sudo nmdctl -s /path/to/superblock.dat reload
 
 For more details, run `sudo nmdctl --help`
 
-### Manual Management (Using Driver Interface)
+## Manual Management (Using Driver Interface)
 The driver provides no automation what so ever, and for example array member disks need to be imported manually every time the driver is loaded, in the correct slots and with correct parameters.
 
 It's important to understand that many things related to automatic detection etc mentioned in the UnRAID storage management docs: https://docs.unraid.net/unraid-os/manual/storage-management are handled by the commercial UnRAID system, and not by the array driver component.
@@ -179,7 +189,7 @@ While the `nmdctl` tool now automates many tasks, understanding the underlying d
 
 <details>
 
-<summary>Driver Interface Details</summary>
+<summary>Expand for Driver Interface Details</summary>
 
 ### Superblock file
 Array state is kept in a superblock file, that is stored outside the array and read by the driver when the driver module is loaded.

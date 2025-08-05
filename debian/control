@@ -1,5 +1,5 @@
 Source: nonraid-dkms
-Section: contrib/kernel
+Section: kernel
 Priority: optional
 Maintainer: Matti Hiljanen <matti@hiljanen.com>
 Build-Depends: debhelper (>=13.1~), dh-sequence-dkms

@@ -42,14 +42,26 @@ jobs:
       - name: Install Debian Package Building Dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y debhelper build-essential
+          sudo apt-get install -y debhelper build-essential devscripts
 
       - name: Create Debian Package
         run: |
           cd tools
-          sed -i "s/1.0.0-1/${{ steps.get-nmdctl.outputs.version }}-${{ steps.get-build.outputs.build }}/" debian/changelog
+          echo "::group::Prepare Debian Package"
+          cat > debian/changelog << EOF
+          nonraid-tools (${{ steps.get-nmdctl.outputs.version }}-${{ steps.get-build.outputs.build }}) noble; urgency=medium
+
+            * NonRAID tools Debian Package
+
+           -- Matti Hiljanen <matti@hiljanen.com>  $(date -R)
+          EOF
+
           cp systemd/nonraid.service debian/nonraid-tools.nonraid.service
+          echo "::endgroup::"
+
+          echo "::group::Build Debian Binary Package"
           dpkg-buildpackage -b -rfakeroot -us -uc
+          echo "::endgroup::"
 
       - name: Upload Debian Package as Artifact
         uses: actions/upload-artifact@v4
@@ -73,6 +85,33 @@ jobs:
           echo "commits<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Publish to PPA
+        if: ${{ github.event.inputs.create_release == 'true' }}
+        env:
+          PPA_GPG_KEY: ${{ secrets.PPA_GPG_KEY }}
+          PPA_GPG_PASSPHRASE: ${{ secrets.PPA_GPG_PASSPHRASE }}
+        run: |
+          cd tools
+          echo "::group::Build Debian Source Package"
+          git archive --format=tar.gz --prefix="nonraid-tools-${{ steps.get-nmdctl.outputs.version }}/" HEAD > "../nonraid-tools_${{ steps.get-nmdctl.outputs.version }}.orig.tar.gz" nmdctl systemd
+          gpg --batch --passphrase-file <(cat <<<"${PPA_GPG_PASSPHRASE}") --import <(cat <<<"${PPA_GPG_KEY}")
+          KEY_ID=$(gpg --list-secret-keys --with-colons | grep '^sec:' | cut -d: -f5 | head -1)
+          debuild -S -i -sa -k"$KEY_ID" -p"gpg --batch --passphrase "$PPA_GPG_PASSPHRASE" --pinentry-mode loopback"
+          echo "::endgroup::"
+
+          echo "::group::Publish to PPA"
+          cat > ~/.dput.cf << EOF
+          [ppa]
+          fqdn = ppa.launchpad.net
+          method = ftp
+          incoming = ~%(ppa)s/ubuntu/
+          login = anonymous
+          allow_unsigned_uploads = 0
+          EOF
+
+          dput ppa:qvr/nonraid ../nonraid-tools_${{ steps.get-nmdctl.outputs.version }}-${{ steps.get-build.outputs.build }}_source.changes
+          echo "::endgroup::"
 
       - name: Create Release
         if: ${{ github.event.inputs.create_release == 'true' }}

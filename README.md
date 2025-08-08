@@ -164,6 +164,13 @@ Where `OPTION` can be:
 - `CANCEL` - (for `nocheck`) cancel a running parity check
 - `PAUSE` - (for `nocheck`) pause a running parity check
 
+### Set array settings
+
+Used to modify array settings, like enabling "turbo write mode" (`md_write_method`) or changing the debug level (`md_trace`). The command will display all available settings if no setting is specified. Empty value will change the setting to its default value.
+```bash
+sudo nmdctl set SETTING VALUE
+```
+
 ### Reload the nonraid module
 
 Reloads the driver module with the specified superblock path. This is can be used to recover from error states or when changing superblock files.

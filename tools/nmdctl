@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.6.1
+VERSION=1.7.0
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -52,6 +52,7 @@ usage() {
     echo "  reload                      Reload nonraid module with specified superblock"
     echo "  check [OPTION]              Start parity check (CORRECT (default), NOCORRECT or RESUME)"
     echo "  nocheck [CANCEL|PAUSE]      Stop parity check (CANCEL or PAUSE)"
+    echo "  set [SETTING] [VALUE]       Set array settings, use 'nmdctl set' for list of available settings"
     echo "  mount [MOUNTPREFIX]         Mount all active data disks (default prefix: /mnt/disk)"
     echo "  unmount                     Unmount all active data disks"
     echo ""
@@ -2330,7 +2331,7 @@ unassign_disk() {
     # Check if other slots are already unassigned
     for check_slot in $(get_defined_slots); do
         local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$check_slot]}"
-        if [ -n "$rdevstatus" ] && ( [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ] ); then
+        if [ -n "$rdevstatus" ] && { [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ]; }; then
             unassigned_disks=$((unassigned_disks + 1))
         fi
     done
@@ -2770,6 +2771,214 @@ unmount_array_disks() {
     return 0
 }
 
+set_array_setting() {
+    check_module_loaded || return 1
+    check_nmdstat_exists || return 1
+
+    if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
+        get_all_nmdstat_values NMDSTAT_VALUES
+    fi
+
+    # Some aliases for most common settings
+    declare -A setting_aliases
+    setting_aliases=(
+        ["turbo"]="md_write_method"
+        ["debug"]="md_trace"
+    )
+
+    # Descriptions for each setting
+    declare -A setting_desc
+    setting_desc["md_write_method"]="Controls the write algorithm (0=READ_MODIFY_WRITE (standard mode), 1=RECONSTRUCT_WRITE (\"turbo write mode\"))\n \
+                         Note: turbo mode needs to have all disks spinning, standard mode only needs parity and the data disk being written to spinning"
+    setting_desc["md_trace"]="Debug trace level (0=off, 1=cmd (default), 2=debug, 3=IO, 4=detailed)"
+    setting_desc["label"]="Sets or changes the array label (max 32 characters)"
+    setting_desc["md_num_stripes"]="Number of stripe cache entries (default: 1280)"
+    setting_desc["md_queue_limit"]="I/O queue limit as percentage (1-100, throttles normal I/O)"
+    setting_desc["md_sync_limit"]="Sync queue limit as percentage (0-100, throttles parity operations)"
+    setting_desc["md_restrict"]="Restriction flags (bitfield controlling array behavior)"
+    setting_desc["invalidslot"]="Sets slots to start as invalid (format: SLOT1 SLOT2)"
+    setting_desc["resync_start"]="Sets parity sync start position in sectors"
+    setting_desc["resync_end"]="Sets parity sync end position in sectors (0=auto)"
+    setting_desc["rderror"]="Simulates read error on next operation for specified slot"
+    setting_desc["wrerror"]="Simulates write error on next operation for specified slot"
+
+    # Show help if no parameter is provided
+    if [ -z "$1" ]; then
+        echo -e "${BLUE}NonRAID Array Settings${NC}"
+        echo ""
+        echo -e "${GREEN}Available settings:${NC}"
+        echo ""
+        echo -e "${YELLOW}Common settings${NC}:"
+        echo -e "  md_write_method [0|1]   ${setting_desc["md_write_method"]}"
+        echo -e "  md_trace [0-4]          ${setting_desc["md_trace"]}"
+        echo -e "  md_queue_limit [1-100]  ${setting_desc["md_queue_limit"]}"
+        echo -e "  md_sync_limit [0-100]   ${setting_desc["md_sync_limit"]}"
+        echo -e "  label [LABEL]           ${setting_desc["label"]}"
+        echo ""
+        echo -e "${YELLOW}Advanced settings:${NC}"
+        echo -e "  md_num_stripes [COUNT]  ${setting_desc["md_num_stripes"]}"
+        echo -e "  invalidslot [SLOT1 [2]] ${setting_desc["invalidslot"]}"
+        echo -e "  resync_start [SECTOR]   ${setting_desc["resync_start"]}"
+        echo -e "  resync_end [SECTOR]     ${setting_desc["resync_end"]}"
+        echo ""
+        echo -e "${YELLOW}Debug settings:${NC}"
+        echo -e "  rderror SLOT            ${setting_desc["rderror"]}"
+        echo -e "  wrerror SLOT            ${setting_desc["wrerror"]}"
+        echo -e "  md_restrict [VALUE]     ${setting_desc["md_restrict"]}"
+        echo ""
+        echo -e "${GREEN}Usage:${NC} nmdctl set SETTING [VALUE]"
+        echo -e "If VALUE is omitted, parameter is reset to its default value."
+        return 0
+    fi
+
+    local setting="$1"
+    shift
+    local value="$*"
+
+    # Substitute alias for actual setting
+    if [[ -n "${setting_aliases[$setting]}" ]]; then
+        setting="${setting_aliases[$setting]}"
+    fi
+
+    # Handle different settings
+    case "$setting" in
+        "md_write_method")
+            if [ "$value" = "" ]; then
+                echo -e "${YELLOW}Resetting write method to default (0 - READ_MODIFY_WRITE)${NC}"
+                value="0"
+            elif [ "$value" = "1" ]; then
+                echo -e "${GREEN}Enabling turbo write mode (RECONSTRUCT_WRITE)${NC}"
+            elif [ "$value" = "0" ]; then
+                echo -e "${GREEN}Setting standard write mode (READ_MODIFY_WRITE)${NC}"
+            else
+                echo -e "${RED}Error: Invalid value for md_write_method. Use 0 or 1${NC}"
+                return 1
+            fi
+            ;;
+        "md_trace")
+            if [ "$value" = "" ]; then
+                echo -e "${YELLOW}Resetting debug trace level to default (1)${NC}"
+                value="1"
+            elif [[ "$value" =~ ^[0-4]$ ]]; then
+                echo -e "${GREEN}Setting debug trace level to $value${NC}"
+            else
+                echo -e "${RED}Error: Invalid value for md_trace. Use 0-4${NC}"
+                return 1
+            fi
+            ;;
+        "md_num_stripes")
+            if [ "$value" = "" ]; then
+                echo -e "${YELLOW}Resetting stripe cache size to default (1280)${NC}"
+                value="1280"
+            elif [[ "$value" =~ ^[0-9]+$ ]]; then
+                echo -e "${GREEN}Setting stripe cache size to $value entries${NC}"
+            else
+                echo -e "${RED}Error: Invalid value for md_num_stripes. Use a positive integer${NC}"
+                return 1
+            fi
+            ;;
+        "md_queue_limit")
+            if [ "$value" = "" ]; then
+                echo -e "${YELLOW}Resetting I/O queue limit to default (80%)${NC}"
+                value="80"
+            elif [[ "$value" =~ ^[1-9][0-9]?$|^100$ ]]; then
+                echo -e "${GREEN}Setting I/O queue limit to $value%${NC}"
+            else
+                echo -e "${RED}Error: Invalid value for md_queue_limit. Use 1-100${NC}"
+                return 1
+            fi
+            ;;
+        "md_sync_limit")
+            if [ "$value" = "" ]; then
+                echo -e "${YELLOW}Resetting sync queue limit to default (5%)${NC}"
+                value="5"
+            elif [[ "$value" =~ ^[0-9]?[0-9]$|^100$ ]]; then
+                echo -e "${GREEN}Setting sync queue limit to $value%${NC}"
+            else
+                echo -e "${RED}Error: Invalid value for md_sync_limit. Use 0-100${NC}"
+                return 1
+            fi
+            ;;
+        "md_restrict")
+            if [ "$value" = "" ]; then
+                echo -e "${YELLOW}Resetting restriction flags to default (1)${NC}"
+                value="1"
+            elif [[ "$value" =~ ^[0-9]+$ ]]; then
+                echo -e "${GREEN}Setting restriction flags to $value${NC}"
+            else
+                echo -e "${RED}Error: Invalid value for md_restrict. Use a positive integer${NC}"
+                return 1
+            fi
+            ;;
+        "invalidslot")
+            if [ "$value" = "" ]; then
+                echo -e "${YELLOW}Resetting invalid slots to defaults (0 29)${NC}"
+                value="0 29"
+            elif [[ "$value" =~ ^[0-9]+\ +[0-9]+$ ]]; then
+                echo -e "${GREEN}Setting invalid slots to $value${NC}"
+            else
+                echo -e "${RED}Error: Invalid format for invalidslot. Use 'SLOT1 SLOT2'${NC}"
+                return 1
+            fi
+            ;;
+        "resync_start"|"resync_end")
+            if [ "$value" = "" ]; then
+                echo -e "${YELLOW}Resetting $setting to default (0)${NC}"
+                value="0"
+            elif [[ "$value" =~ ^[0-9]+$ ]]; then
+                echo -e "${GREEN}Setting $setting to sector $value${NC}"
+            else
+                echo -e "${RED}Error: Invalid value for $setting. Use a non-negative integer${NC}"
+                return 1
+            fi
+            ;;
+        "rderror"|"wrerror")
+            if [ "$value" = "" ] || ! [[ "$value" =~ ^[0-9]+$ ]]; then
+                echo -e "${RED}Error: $setting requires a valid disk slot number${NC}"
+                return 1
+            else
+                echo -e "${YELLOW}Simulating ${setting:0:2} error on slot $value${NC}"
+            fi
+            ;;
+        "label")
+            if [ "${NMDSTAT_VALUES[mdState]}" != "STOPPED" ]; then
+                echo -e "${YELLOW}Label can only be set when the array is stopped.${NC}"
+                return 1
+            fi
+            if [ -z "$value" ]; then
+                echo -e "${YELLOW}Resetting array label to default (empty)${NC}"
+                value=""
+            elif [[ "$value" =~ ^[a-zA-Z0-9_]{1,32}$ ]]; then
+                echo -e "${GREEN}Setting array label to '$value'${NC}"
+            else
+                echo -e "${RED}Error: Invalid label format. Use alphanumeric characters and underscores only, max 32 characters${NC}"
+                return 1
+            fi
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown setting '$setting'${NC}"
+            echo -e "Run 'nmdctl set' without parameters to see available settings"
+            return 1
+            ;;
+    esac
+
+    # Prepare and execute the command
+    local cmd="set $setting $value"
+    if [ "$setting" = "label" ]; then
+        # label is its own command
+        cmd="label $value"
+    fi
+    echo -e "${YELLOW}Executing: $cmd${NC}"
+
+    if run_nmd_command "$cmd"; then
+        echo -e "${GREEN}Setting applied successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}Failed to apply setting (check dmesg for details)${NC}"
+        return 1
+    fi
+}
+
 # Main entry point
 main() {
     # Check for at least one argument
@@ -2890,6 +3099,9 @@ main() {
             ;;
         "unmount"|"umount")
             unmount_array_disks
+            ;;
+        "set")
+            set_array_setting "$@"
             ;;
         *)
             echo -e "${RED}Error: Unknown command '$command'${NC}"

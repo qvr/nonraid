@@ -141,7 +141,7 @@ jobs:
             ## What's Included
             - `nonraid-dkms` package with kernel module source and build scripts
             - Compatible with kernel versions **6.1 - 6.8** and **6.11 and later** (tested up to 6.14) (6.9 and 6.10 are not supported)
-            - Tested on Ubuntu 24.04 LTS (with GA kernel 6.8 and HWE kernels 6.11, 6.14) and Debian 12 (with kernel 6.1)
+            - Tested on Ubuntu 24.04 LTS (with GA kernel 6.8 and HWE kernels 6.11, 6.14), Debian 12 (with kernel 6.1) and Debian 13 (with kernel 6.12)
 
             ## Changes Since Last Release
             ${{ steps.get-commits.outputs.commits }}

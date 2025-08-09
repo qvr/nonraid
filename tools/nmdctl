@@ -1107,6 +1107,11 @@ import_disks() {
     # Process all defined disk slots
     for slot in $(get_defined_slots); do
         local disk_id=$(get_nmdstat_value "diskId.$slot")
+        local short_id="${disk_id}"
+        if [ ${#short_id} -gt 33 ]; then
+            # If diskId is longer than 32 characters, truncate it for display
+            short_id="${disk_id:0:30}..."
+        fi
 
         # Check if this slot already has a device imported
         local rdevname=$(get_nmdstat_value "rdevName.$slot")
@@ -1163,7 +1168,7 @@ import_disks() {
                         fi
                     fi
 
-                    echo -e "Found disk for slot $slot: ${BLUE}$(basename "$partition")${NC} (ID: ${disk_id:0:25}...)"
+                    echo -e "Found disk for slot $slot: ${BLUE}$(basename "$partition")${NC} (ID: ${short_id})"
 
                     # Store partition name without /dev/
                     partition=$(basename "$partition")
@@ -1178,7 +1183,7 @@ import_disks() {
                 echo -e "${YELLOW}Warning: No partition found for disk $found_device${NC}"
             fi
         else
-            echo -e "${YELLOW}Warning: Could not find physical disk for ID: ${disk_id:0:25}...${NC}"
+            echo -e "${YELLOW}Warning: Could not find physical disk for ID: ${short_id}${NC}"
         fi
     done
 

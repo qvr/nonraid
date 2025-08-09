@@ -451,8 +451,8 @@ determine_array_health() {
     elif [ "$imported_disks" -eq 0 ] && [ "$total_slots" -gt 0 ]; then
         health_status="${RED}OFFLINE${NC}"
         health_details="No disks imported"
-    # Check if not all disks are imported
-    elif [ "$imported_disks" -lt "$total_slots" ]; then
+    # Check if not all disks are imported before starting
+    elif [ "$imported_disks" -lt "$total_slots" ] && [ "$mdstate" != "STARTED" ]; then
         health_status="${YELLOW}PARTIAL${NC}"
         health_details="$imported_disks/$total_slots disks imported"
     # Check for standard degraded conditions
@@ -471,10 +471,10 @@ determine_array_health() {
         [ "$sbsyncerrs" -gt 0 ] && issues="${issues}Sync Errors: $sbsyncerrs, "
         # Remove trailing comma and space
         health_details=${issues%, }
-    # Check if array is stopped but healthy
     elif [ "$disks_num_errors" -gt 0 ]; then
         health_status="${YELLOW}WARNING${NC}"
         health_details="All disks present, but some have read or write errors ($disks_num_errors total)"
+    # Check if array is stopped but healthy
     elif [ "$mdstate" = "STOPPED" ]; then
         health_status="${YELLOW}READY${NC}"
         health_details="All disks imported but array is not started"

@@ -78,7 +78,7 @@ check_root() {
 # Run a command via nmdcmd
 run_nmd_command() {
     check_root
-    if ! echo "$1" > /proc/nmdcmd; then
+    if ! echo -n "$1" > /proc/nmdcmd; then
         echo -e "${RED}Error: Failed to run command '$1'${NC}"
         return 1
     fi

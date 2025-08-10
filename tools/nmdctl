@@ -60,6 +60,7 @@ usage() {
     echo "  -s, --super PATH            Superblock file path to use when loading the module (default: $DEFAULT_SUPERBLOCK)"
     echo "  -k, --keyfile PATH          Path to LUKS keyfile to use during mounting (default: $LUKS_KEYFILE)"
     echo "  -u, --unattended            Enable unattended mode, will import and start a healthy array without prompts"
+    echo "  --no-color                  Disable colored output"
     echo "  -v, --verbose               Enable verbose output"
     echo "  -V, --version               Display version information"
     echo "  -h, --help                  Display this help message"

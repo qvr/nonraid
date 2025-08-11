@@ -420,7 +420,7 @@ determine_array_health() {
         disks_num_errors=$((disks_num_errors + "${NMDSTAT_VALUES[rdevNumErrors.$slot]}"))
     done
 
-    local last_sync="never"
+    local last_sync="${YELLOW}never${NC}"
     # When did the last sync operation end
     if [ "$sbsynced2" != "0" ]; then
         last_sync_ago=$(($(printf "%(%s)T")-sbsynced2))
@@ -432,7 +432,7 @@ determine_array_health() {
             last_sync="$last_sync ${RED}(errors encountered)${NC}"
         fi
     elif [ "$sbsynced" != "0" ]; then
-        last_sync="in progress"
+        last_sync="${BLUE}in progress${NC}"
     fi
 
     local return_code=1

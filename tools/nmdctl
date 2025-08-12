@@ -1490,9 +1490,15 @@ start_check() {
         return 1
     fi
 
-    local mdstate=$(get_nmdstat_value "mdState")
-    local mdresyncaction=$(get_nmdstat_value "mdResyncAction")
-    local mdresynccorr=$(get_nmdstat_value "mdResyncCorr")
+    if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
+        get_all_nmdstat_values NMDSTAT_VALUES
+    fi
+
+    local mdstate=${NMDSTAT_VALUES[mdState]}
+    local mdresyncaction=${NMDSTAT_VALUES[mdResyncAction]}
+    local mdresynccorr=${NMDSTAT_VALUES[mdResyncCorr]}
+    local mdresyncpos=${NMDSTAT_VALUES[mdResyncPos]}
+    local mdresync=${NMDSTAT_VALUES[mdResync]}
 
     if [ "$mdstate" != "STARTED" ]; then
         echo -e "${RED}Error: Array must be started to run parity check${NC}"
@@ -1500,6 +1506,22 @@ start_check() {
     fi
 
     local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
+
+    if [[ "$mdresync" -gt 0 ]] && [[ "$mdresyncpos" -gt 0 ]]; then
+        echo -e "${RED}Error: Resync operation $friendly_action is already in progress${NC}"
+        return 1
+    fi
+
+    # Check if a previous resync operation is paused, and we were not called with resume
+    if [[ "$mdresync" -eq 0 ]] && [[ "$mdresyncpos" -gt 0 ]] && [[ "${option^^}" != "RESUME" ]]; then
+        echo -e "${YELLOW}Warning: Previous resync operation $friendly_action is currently paused at position $mdresyncpos${NC}"
+        echo -e "${YELLOW}You can resume it with ${GREEN}nmdctl check RESUME${NC}"
+        read -r -p "Are you sure you want to start a new operation without resuming? (y/N): " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Parity check cancelled by user"
+            return 1
+        fi
+    fi
     # Check if some other sync operation is pending, and confirm with the user
     if [[ "$mdresyncaction" != check* ]]; then
         echo -e "${YELLOW}Warning: Another sync operation is pending: $friendly_action${NC}"
@@ -1537,7 +1559,7 @@ start_check() {
         return 1
     fi
 
-    echo -e "${GREEN}$friendly_action started${NC}"
+    echo -e "${GREEN}$friendly_action $([[ "${option^^}" != "RESUME" ]] && echo "started" || echo "resumed")${NC}"
     return 0
 }
 

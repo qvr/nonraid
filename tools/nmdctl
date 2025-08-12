@@ -1524,13 +1524,13 @@ start_check() {
     fi
     # Check if some other sync operation is pending, and confirm with the user
     if [[ "$mdresyncaction" != check* ]]; then
-        echo -e "${YELLOW}Warning: Another sync operation is pending: $friendly_action${NC}"
+        echo -e "${YELLOW}Warning: A sync operation other than parity check is pending: $friendly_action${NC}"
         if [ "$UNATTENDED" -eq 1 ]; then
             echo -e "${RED}Error: Cannot start parity check with another sync operation pending (unattended mode)${NC}"
             return 1
         fi
 
-        read -r -p "Do you want to continue with this sync operation? (y/N): " confirm
+        read -r -p "Do you want to proceed with $friendly_action? (y/N): " confirm
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             echo "Sync operation cancelled by user"
             return 1

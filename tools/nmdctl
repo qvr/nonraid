@@ -603,13 +603,32 @@ show_resync_status() {
     local mdresync="${NMDSTAT_VALUES[mdResync]}"
     local mdresyncaction="${NMDSTAT_VALUES[mdResyncAction]}"
     local mdresynccorr="${NMDSTAT_VALUES[mdResyncCorr]}"
+    local mdresyncpos="${NMDSTAT_VALUES[mdResyncPos]}"
+    local mdresyncsize="${NMDSTAT_VALUES[mdResyncSize]}"
 
-    # Check for pending disk clearing
+
     local array_start_maybe="Start the array and use"
     if [ "${NMDSTAT_VALUES[mdState]}" = "STARTED" ]; then
         array_start_maybe="Use"
     fi
-    if [ "$mdresync" = "0" ] && [ "$mdresyncaction" = "clear" ]; then
+
+    # Check for paused operation
+    if [ "$mdresync" = "0" ] && [ "$mdresyncpos" != "0" ] && [ -n "$mdresyncpos" ]; then
+        # Calculate progress percentage
+        local progress=0
+        if [ "$mdresyncsize" -gt 0 ]; then
+            progress=$(( mdresyncpos * 100 / mdresyncsize ))
+        fi
+
+        # Format the resync action to be user-friendly
+        local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
+
+        echo ""
+        echo -e "Operation     : ${BLUE}$friendly_action${NC} ${YELLOW}(PAUSED)${NC}"
+        echo -e "Progress      : $progress% ($mdresyncpos/$mdresyncsize blocks)"
+        echo -e "${YELLOW}Resume with   : '${GREEN}nmdctl check resume${YELLOW}' command${NC}"
+    # Check for pending disk clearing
+    elif [ "$mdresync" = "0" ] && [ "$mdresyncaction" = "clear" ]; then
         echo ""
         local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
         echo -e "${YELLOW}Disk clearing pending: New disk needs to be cleared${NC}"
@@ -622,8 +641,6 @@ show_resync_status() {
         echo -e "${YELLOW}${array_start_maybe} '${GREEN}nmdctl check${YELLOW}' command to start the reconstruction${NC}"
     # Check for active reconstruction or check operation
     elif [ "$mdresync" != "0" ] && [ -n "$mdresync" ]; then
-        local mdresyncpos="${NMDSTAT_VALUES[mdResyncPos]}"
-        local mdresyncsize="${NMDSTAT_VALUES[mdResyncSize]}"
         local mdresyncdt="${NMDSTAT_VALUES[mdResyncDt]}"
         local mdresyncdb="${NMDSTAT_VALUES[mdResyncDb]}"
 

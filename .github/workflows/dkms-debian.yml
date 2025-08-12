@@ -80,10 +80,10 @@ jobs:
           LAST_DKMS_TAG=$(git tag -l "nonraid-dkms-*" --sort=-committerdate | head -n1 || echo "none")
           if [ "$LAST_DKMS_TAG" = "none" ]; then
             # If no nonraid-dkms tags exist, get all commits
-            COMMITS=$(git log --pretty=format:"- %s (%h)" -- md_nonraid/ raid6/ docs/ debian/)
+            COMMITS=$(git log --pretty=format:"- %s (%h)" -- md_nonraid/ raid6/ docs/ debian/ README.md Makefile dkms.conf)
           else
             # Get commits since the last nonraid-dkms tag
-            COMMITS=$(git log ${LAST_DKMS_TAG}..HEAD --pretty=format:"- %s (%h)" -- md_nonraid/ raid6/ docs/ debian/ Makefile dkms.conf)
+            COMMITS=$(git log ${LAST_DKMS_TAG}..HEAD --pretty=format:"- %s (%h)" -- md_nonraid/ raid6/ docs/ debian/ README.md Makefile dkms.conf)
           fi
           echo "commits<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMITS" >> $GITHUB_OUTPUT

@@ -30,7 +30,25 @@ The supported kernel version ranges might be inaccurate, the driver has been tes
 
 ## Installation
 
-For Ubuntu/Debian based systems, download and install both the kernel module and management tools:
+For Ubuntu/Debian based systems, you can install NonRAID through the PPA repository or by downloading the packages directly.
+
+### Option 1: Install from PPA
+
+The [PPA repository](https://launchpad.net/~qvr/+archive/ubuntu/nonraid) provides an easy way to install and update NonRAID packages:
+
+```bash
+# Add the NonRAID PPA
+sudo add-apt-repository ppa:qvr/nonraid
+sudo apt update
+
+# Install prerequisites and NonRAID packages
+sudo apt install linux-headers-$(uname -r) nonraid-dkms nonraid-tools
+```
+
+> [!TIP]
+> This PPA has been tested to work on Ubuntu 24.04 LTS and Debian 12/13, though on Debian you need to manually add the repository and the signing key.
+
+### Option 2: Install from GitHub Releases
 
 1. Download the latest packages from separate releases:
    - [DKMS kernel module package](https://github.com/qvr/nonraid/releases?q=nonraid+dkms)
@@ -43,7 +61,14 @@ sudo apt install dkms linux-headers-$(uname -r) build-essential
 
 # Install the DKMS module and management tools
 sudo apt install ./nonraid-dkms_*.deb ./nonraid-tools_*.deb
+```
 
+### Option 3: Fully manual installation from repository source
+For other distributions, or if you want to build the DKMS module manually, you can clone the repository and build the DKMS module from source, and copy the management tool from [tools/nmdctl](tools/nmdctl).
+
+### Post-installation steps
+
+```bash
 # Verify the DKMS module installation
 sudo dkms status
 
@@ -54,7 +79,7 @@ sudo update-initramfs -u -k all
 > [!NOTE]
 > Updating the initramfs is needed to make sure the new `raid6_pq` module is used, as otherwise the unpatched module gets loaded by other modules depending on it during initramfs, at least on Ubuntu 24.04. Future kernel upgrades should automatically rebuild the DKMS module, and update the initramfs.
 
-3. Reboot your system. After rebooting, you can start using NonRAID by creating a new array with the command:
+Reboot your system. After rebooting, you can start using NonRAID by creating a new array with the command:
 
 ```bash
 sudo nmdctl create
@@ -75,7 +100,7 @@ Displays the status of the array and individual disks. Displays detected filesys
 ```bash
 sudo nmdctl status
 ```
-Exits with an error code if there are any issues with the array, so this can be used as a simple monitoring in a cronjob. (Global `--no-color` option disables `nmdctl` colored ouput, making it more suitable for cron emails.)
+Exits with an error code if there are any issues with the array, so this can be used as a simple monitoring in a cronjob. (Global `--no-color` option disables `nmdctl` colored output, making it more suitable for cron emails.)
 
 ### Create a new array (interactive)
 
@@ -304,7 +329,6 @@ As the driver is not intended to be used manually, normally the UnRAID UI makes 
 - For a complete, polished storage solution with support, you might want to still consider getting UnRAID
 
 ## Plans
-- Look into setting up a PPA for the dkms and tools packages, making updates easier
 - **IF** we decide to diverge further from the upstream, the module should be fairly simple to modify to build on multiple kernel versions, so that we dont have to ship multiple versions of the module code for different kernel versions (and we would be able to support 6.9 and 6.10 kernels too) - currently not planned though
 
 ## License

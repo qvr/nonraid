@@ -77,10 +77,10 @@ jobs:
           LAST_TOOLS_TAG=$(git tag -l "nonraid-tools-*" --sort=-committerdate | head -n1 || echo "none")
           if [ "$LAST_TOOLS_TAG" = "none" ]; then
             # If no nonraid-tools tags exist, get all commits
-            COMMITS=$(git log --pretty=format:"- %s (%h)" -- tools/)
+            COMMITS=$(git log --pretty=format:"- %s (%h)" -- tools/ README.md)
           else
             # Get commits since the last nonraid-tools tag
-            COMMITS=$(git log ${LAST_TOOLS_TAG}..HEAD --pretty=format:"- %s (%h)" -- tools/)
+            COMMITS=$(git log ${LAST_TOOLS_TAG}..HEAD --pretty=format:"- %s (%h)" -- tools/ README.md)
           fi
           echo "commits<<EOF" >> $GITHUB_OUTPUT
           echo "$COMMITS" >> $GITHUB_OUTPUT

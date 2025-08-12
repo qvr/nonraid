@@ -611,12 +611,14 @@ show_resync_status() {
     fi
     if [ "$mdresync" = "0" ] && [ "$mdresyncaction" = "clear" ]; then
         echo ""
+        local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
         echo -e "${YELLOW}Disk clearing pending: New disk needs to be cleared${NC}"
         echo -e "${YELLOW}${array_start_maybe} '${GREEN}nmdctl check${YELLOW}' command to start the disk clear${NC}"
     # Check for pending reconstruction
     elif [ "$mdresync" = "0" ] && [[ "$mdresyncaction" == recon* ]]; then
         echo ""
-        echo -e "${YELLOW}Disk reconstruction pending: ${BLUE}$mdresyncaction${NC}"
+        local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
+        echo -e "${YELLOW}Disk reconstruction pending: ${BLUE}$friendly_action${NC}"
         echo -e "${YELLOW}${array_start_maybe} '${GREEN}nmdctl check${YELLOW}' command to start the reconstruction${NC}"
     # Check for active reconstruction or check operation
     elif [ "$mdresync" != "0" ] && [ -n "$mdresync" ]; then
@@ -624,12 +626,6 @@ show_resync_status() {
         local mdresyncsize="${NMDSTAT_VALUES[mdResyncSize]}"
         local mdresyncdt="${NMDSTAT_VALUES[mdResyncDt]}"
         local mdresyncdb="${NMDSTAT_VALUES[mdResyncDb]}"
-
-        local corr="(correcting)"
-        # Check or correction operation
-        if [ "$mdresynccorr" = "0" ]; then
-            corr="(check only)"
-        fi
 
         # Calculate progress percentage
         local progress=0
@@ -661,13 +657,58 @@ show_resync_status() {
         fi
         local eta_formatted=$(format_time_duration $eta_seconds)
 
+        # Format the resync action to be user-friendly
+        local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
+
         echo ""
-        echo -e "Operation     : ${BLUE}$mdresyncaction${NC} $corr"
+        echo -e "Operation     : ${BLUE}$friendly_action${NC}"
         echo -e "Progress      : $progress% ($mdresyncpos/$mdresyncsize blocks)"
         echo -e "Speed         : $rate_mb MB/s"
         echo -e "Elapsed Time  : $elapsed_formatted"
         echo -e "ETA           : $eta_formatted"
     fi
+}
+
+# Format mdResyncAction into user-friendly term
+format_resync_action() {
+    local action="$1"
+    local resynccorr="${2:-}"
+
+    local base_action=${action%% *}
+    local args=""
+    if [[ "$action" == *" "* ]]; then
+        args=${action#* }
+    fi
+
+    local formatted_action=""
+
+    case "$base_action" in
+        "check")
+            formatted_action="Parity-Check $args"
+            if [ -n "$resynccorr" ]; then
+                if [ "$resynccorr" = "0" ]; then
+                    formatted_action+=" (check only)"
+                else
+                    formatted_action+=" (correcting)"
+                fi
+            fi
+            ;;
+        "recon")
+            if [[ $args =~ ^D([0-9]+)$ ]]; then
+                formatted_action="Data-Rebuild Disk ${BASH_REMATCH[1]}"
+            else
+                formatted_action="Parity-Sync $args"
+            fi
+            ;;
+        "clear")
+            formatted_action="Disk clearing"
+            ;;
+        *)
+            formatted_action="$action"
+            ;;
+    esac
+
+    echo "$formatted_action"
 }
 
 # Calculate visible length of disk status for alignment
@@ -1434,15 +1475,17 @@ start_check() {
 
     local mdstate=$(get_nmdstat_value "mdState")
     local mdresyncaction=$(get_nmdstat_value "mdResyncAction")
+    local mdresynccorr=$(get_nmdstat_value "mdResyncCorr")
 
     if [ "$mdstate" != "STARTED" ]; then
         echo -e "${RED}Error: Array must be started to run parity check${NC}"
         return 1
     fi
 
+    local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
     # Check if some other sync operation is pending, and confirm with the user
     if [[ "$mdresyncaction" != check* ]]; then
-        echo -e "${YELLOW}Warning: Another sync operation is pending: $mdresyncaction${NC}"
+        echo -e "${YELLOW}Warning: Another sync operation is pending: $friendly_action${NC}"
         if [ "$UNATTENDED" -eq 1 ]; then
             echo -e "${RED}Error: Cannot start parity check with another sync operation pending (unattended mode)${NC}"
             return 1
@@ -1453,20 +1496,31 @@ start_check() {
             echo "Sync operation cancelled by user"
             return 1
         fi
+    else
+        if [ -z "$1" ] && [ "$UNATTENDED" -eq 1 ]; then
+            echo -e "${YELLOW}Warning: Using NOCORRECT mode by default in unattended mode${NC}"
+            option="NOCORRECT"
+        elif [ -z "$1" ]; then
+            echo -e "${YELLOW}No option provided, defaulting to corrective parity check${NC}"
+            read -r -p "Do you want to continue? (y/N): " confirm
+            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                echo "Parity check cancelled by user"
+                return 1
+            fi
+        fi
+        # reformat with chosen no/correct option
+        if [ "${option^^}" != "RESUME" ]; then
+            friendly_action=$(format_resync_action "$mdresyncaction" "$( [[ ${option^^} == "CORRECT" ]] && echo "1" || echo "0" )")
+        fi
     fi
 
-    if [ -z "$1" ] && [ "$UNATTENDED" -eq 1 ]; then
-        echo -e "${YELLOW}Warning: Using NOCORRECT mode by default in unattended mode${NC}"
-        option="NOCORRECT"
-    fi
-
-    echo "Starting parity check with option $option..."
+    echo "$([[ "${option^^}" != "RESUME" ]] && echo "Starting" || echo "Resuming") $friendly_action..."
     if ! run_nmd_command "check $option"; then
-        echo -e "${RED}Error: Failed to start parity check${NC}"
+        echo -e "${RED}Error: Failed to start $friendly_action${NC}"
         return 1
     fi
 
-    echo -e "${GREEN}Parity check started${NC}"
+    echo -e "${GREEN}$friendly_action started${NC}"
     return 0
 }
 
@@ -1480,19 +1534,22 @@ stop_check() {
     fi
 
     local mdstate=$(get_nmdstat_value "mdState")
+    local mdresyncaction=$(get_nmdstat_value "mdResyncAction")
+    local mdresynccorr=$(get_nmdstat_value "mdResyncCorr")
 
     if [ "$mdstate" != "STARTED" ]; then
         echo -e "${RED}Error: Array must be started to stop parity check${NC}"
         return 1
     fi
 
-    echo "Stopping parity check with option $option..."
+    local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
+    echo "$([[ "${option^^}" != "PAUSE" ]] && echo "Stopping" || echo "Pausing") $friendly_action..."
     if ! run_nmd_command "nocheck $option"; then
-        echo -e "${RED}Error: Failed to stop parity check${NC}"
+        echo -e "${RED}Error: Failed to $([[ "${option^^}" != "PAUSE" ]] && echo "stop" || echo "pause") $friendly_action${NC}"
         return 1
     fi
 
-    echo -e "${GREEN}Parity check stopped${NC}"
+    echo -e "${GREEN}$friendly_action $([[ "${option^^}" != "PAUSE" ]] && echo "stopped" || echo "paused")${NC}"
     return 0
 }
 

@@ -6,12 +6,15 @@ After=local-fs.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+StateDirectory=nonraid
 Environment="SUPER=/nonraid.dat"
 EnvironmentFile=-/etc/default/nonraid
 ExecStart=nmdctl -u -v -s $SUPER start
+ExecStart=bash -c 'if [[ -f "${STATE_DIRECTORY}/array.running" ]]; then echo "Unclean shutdown detected!"; nmdctl -u check correct; else touch "${STATE_DIRECTORY}/array.running"; fi'
 ExecStart=nmdctl -u mount
 ExecStop=nmdctl -u unmount
 ExecStop=nmdctl -u stop
+ExecStop=rm -f ${STATE_DIRECTORY}/array.running
 
 [Install]
 WantedBy=multi-user.target

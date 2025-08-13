@@ -1441,7 +1441,7 @@ stop_array() {
             continue
         fi
         local diskname="${NMDSTAT_VALUES["diskName.$slot"]}"
-        local fs_type=$(get_fs_type "$diskname")
+        local fs_type=$(get_fs_type "/dev/$diskname")
         local current_mountpoint=$(get_mountpoint "$diskname" "$fs_type")
         if [ -n "$current_mountpoint" ] && [ "$current_mountpoint" != "unmounted" ]; then
             unmount_needed=1

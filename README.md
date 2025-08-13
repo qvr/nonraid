@@ -198,7 +198,7 @@ sudo nmdctl set SETTING VALUE
 
 ### Reload the nonraid module
 
-Reloads the driver module with the specified superblock path. This is can be used to recover from error states or when changing superblock files.
+Reloads the driver module with the specified superblock path. This can be used to recover from error states or when changing superblock files.
 ```bash
 sudo nmdctl reload
 ```

@@ -1730,6 +1730,8 @@ create_array() {
             echo -e "ID: $disk_id"
         else
             echo -e "ID: Unknown"
+            echo -e "${RED}No disk ID found for this device - unable to use it in the array${NC}"
+            continue
         fi
         echo ""
         if [ "$do_new_config" -eq 1 ]; then
@@ -2179,6 +2181,8 @@ add_disk() {
             echo -e "ID: $selected_disk_id"
         else
             echo -e "ID: Unknown"
+            echo -e "${RED}No disk ID found for this device - unable to use it in the array${NC}"
+            continue
         fi
         echo ""
 

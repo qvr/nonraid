@@ -1,0 +1,23 @@
+# This file is sourced by the nonraid.service systemd unit
+
+# Path to the NonRAID superblock file
+# Default: /nonraid.dat
+# Example: SUPER=/path/to/your/nonraid.dat
+#SUPER=/nonraid.dat
+
+# Additional parameters for mounting
+# These parameters are passed to nmdctl mount command
+# Default: empty (no additional parameters)
+# Examples:
+#   - Custom LUKS keyfile location: MOUNT_PARAMS="-k /custom/path/to/luks.keyfile"
+#   - Custom LUKS keyfile location and mount prefix: MOUNT_PARAMS="-k /custom/path/to/luks.keyfile /mnt/pool/disk"
+#MOUNT_PARAMS=""
+
+# Startup settings to apply when the array starts
+# Format: comma-separated list of nmdctl set commands (without "nmdctl set")
+# Use 'nmdctl set' for full list of settings
+# Default: empty (no startup settings)
+# Examples:
+#   - Set turbo write mode: STARTUP_SETTINGS="md_write_method 1"
+#   - Multiple settings: STARTUP_SETTINGS="md_write_method 1, md_trace 2"
+#STARTUP_SETTINGS=""

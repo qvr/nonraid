@@ -104,7 +104,7 @@ Exits with an error code if there are any issues with the array, so this can be 
 
 ### Create a new array (interactive)
 
-This assumes that the disks are already partitioned - the largest (unused) partition will be shown as an option to add to the array.
+This assumes that the disks are already partitioned - the largest (unused) partition will be shown as an option to add to the array. The disks also need to have a unique disk ID that should be visible in `/dev/disk/by-id/` - some virtualization platforms may not expose this by default and `nmdctl` will refuse to use disks missing an ID.
 
 You can partition the disks with the command `sudo sgdisk -o -a 8 -n 1:32K:0 /dev/sdX` (this will create a new partition table on the disk, so be careful to use the correct disk).
 ```bash
@@ -198,7 +198,7 @@ sudo nmdctl set SETTING VALUE
 
 ### Reload the nonraid module
 
-Reloads the driver module with the specified superblock path. This is can be used to recover from error states or when changing superblock files.
+Reloads the driver module with the specified superblock path. This can be used to recover from error states or when changing superblock files.
 ```bash
 sudo nmdctl reload
 ```

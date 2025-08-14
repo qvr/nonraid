@@ -57,6 +57,7 @@ jobs:
           EOF
 
           cp systemd/nonraid.service debian/nonraid-tools.nonraid.service
+          cp systemd/nonraid.default debian/nonraid-tools.nonraid.default
           echo "::endgroup::"
 
           echo "::group::Build Debian Binary Package"

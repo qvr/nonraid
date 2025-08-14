@@ -6,3 +6,6 @@ export DH_VERBOSE=1
 
 override_dh_installsystemd:
 	dh_installsystemd --name=nonraid --no-stop-on-upgrade --no-start
+
+override_dh_installinit:
+	dh_installinit -n --name nonraid

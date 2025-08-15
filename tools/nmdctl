@@ -249,6 +249,39 @@ format_array_state() {
     esac
 }
 
+format_available_devices() {
+    local available_devices=("$@")
+    echo -e "Available devices:"
+    echo ""
+    echo -e "  #   Device      Size(GB)  ID"
+    echo -e "  --  ----------  --------  ---------------------------------"
+
+    local device_index=1
+    for device_info in "${available_devices[@]}"; do
+        IFS='|' read -r dev partition size_kb size_gb disk_id <<< "$device_info"
+
+        # Show shortened disk ID for clarity
+        local short_id="${disk_id}"
+        if [ ${#short_id} -gt 33 ]; then
+            short_id="${short_id:0:30}..."
+        fi
+
+        if [ -z "$short_id" ]; then
+            short_id=$(echo -e "${RED}No disk ID found - cannot use in array${NC}")
+        fi
+
+        printf "  %-2d  %-10s  %-8s  %s\n" \
+            "$device_index" \
+            "$(basename "$dev")" \
+            "$size_gb" \
+            "$short_id"
+
+        device_index=$((device_index + 1))
+    done
+
+    echo ""
+}
+
 # Check if the nonraid driver is in an inconsistent state
 # Returns 0 if inconsistent, 1 if consistent
 check_driver_inconsistent_state() {
@@ -1711,6 +1744,8 @@ create_array() {
     echo -e "Found ${GREEN}${#available_devices[@]}${NC} suitable devices with partitions"
     echo ""
 
+    format_available_devices "${available_devices[@]}"
+
     # Ask for array label
     local array_label=""
     read -r -p "Enter a label for the array (optional): " array_label
@@ -1742,6 +1777,7 @@ create_array() {
         else
             echo -e "ID: Unknown"
             echo -e "${RED}No disk ID found for this device - unable to use it in the array${NC}"
+            read -r -p "Press enter to continue..." _
             continue
         fi
         echo ""
@@ -2137,34 +2173,7 @@ add_disk() {
     local selected_size_gb=0
     local selected_disk_id=""
 
-    echo -e "Available devices:"
-    echo ""
-    echo -e "  #   Device      Size(GB)  ID"
-    echo -e "  --  ----------  --------  ---------------------------------"
-
-    local device_index=1
-    for device_info in "${available_devices[@]}"; do
-        IFS='|' read -r dev partition size_kb size_gb disk_id <<< "$device_info"
-
-        # Show shortened disk ID for clarity
-        local short_id="${disk_id}"
-        if [ ${#short_id} -gt 33 ]; then
-            short_id="${short_id:0:30}..."
-        fi
-        if [ -z "$short_id" ]; then
-            short_id=$(echo -e "${RED}No disk ID found - cannot use${NC}")
-        fi
-
-        printf "  %-2d  %-10s  %-8s  %s\n" \
-            "$device_index" \
-            "$(basename "$dev")" \
-            "$size_gb" \
-            "$short_id"
-
-        device_index=$((device_index + 1))
-    done
-
-    echo ""
+    format_available_devices "${available_devices[@]}"
 
     # Select device
     while true; do

@@ -178,16 +178,16 @@ sudo nmdctl unmount
 
 ### Start/stop a parity check
 
-This will also start reconstruction or clear operations depending on the array state, user confirmation is required if a normal parity check is not being started. In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`).
+This will also start reconstruction or clear operations depending on the array state, user confirmation is required if a normal parity check is not being started. In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`), this is recommended for scheduled parity checks (like a cronjob).
 ```bash
-sudo nmdctl check/nocheck OPTION
+sudo nmdctl check OPTION
 ```
 Where `OPTION` can be:
 - `CORRECT` - start a corrective parity check, this is the default if no option is given
 - `NOCORRECT` - start a check-only parity check, this is the default in unattended mode
-- `RESUME` - resume a previously started parity check
-- `CANCEL` - (for `nocheck`) cancel a running parity check
-- `PAUSE` - (for `nocheck`) pause a running parity check
+- `RESUME` - resume a previously paused parity check
+- `CANCEL` - cancel a running parity check
+- `PAUSE` - pause a running parity check
 
 ### Set array settings
 

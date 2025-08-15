@@ -1585,6 +1585,11 @@ handle_check() {
         return 1
     fi
 
+    if [[ "${option^^}" == "RESUME" ]] &&  [[ "$mdresyncpos" -eq 0 ]]; then
+        echo -e "${YELLOW}Warning: No paused resync operation to resume${NC}"
+        return 1
+    fi
+
     # Check if a previous resync operation is paused, and we were not called with resume
     if [[ "$mdresync" -eq 0 ]] && [[ "$mdresyncpos" -gt 0 ]] && [[ "${option^^}" != "RESUME" ]]; then
         echo -e "${YELLOW}Warning: Previous resync operation $friendly_action is currently paused at position $mdresyncpos${NC}"

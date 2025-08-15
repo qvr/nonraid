@@ -236,8 +236,8 @@ Commands will load the driver module automatically if it is not loaded already, 
 ```bash
 sudo nmdctl -s /path/to/superblock.dat reload
 ```
-
-For more details, run `sudo nmdctl --help`
+> [!TIP]
+> If you change the default superblock location, you should also change it in `/etc/default/nonraid`, as the systemd service will otherwise continue to use the default path when starting the array at boot.
 
 ## Manual Management (Using Driver Interface)
 If you need to interact with the raw kernel driver (for troubleshooting, development, or to understand what `nmdctl` is doing under the hood), details on the driver interface can be found in: [docs/manual-management.md](docs/manual-management.md).

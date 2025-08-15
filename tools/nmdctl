@@ -37,6 +37,7 @@ declare -A NMDSTAT_VALUES
 
 # Display usage information
 usage() {
+    local exit_code="${1:-1}"
     echo "nmdctl - NonRAID array management utility (v$VERSION)"
     echo ""
     echo "Usage: nmdctl [GLOBAL OPTIONS] COMMAND [COMMAND OPTIONS]"
@@ -65,7 +66,7 @@ usage() {
     echo "  -V, --version               Display version information"
     echo "  -h, --help                  Display this help message"
     echo ""
-    exit 1
+    exit "$exit_code"
 }
 
 # Check if running as root
@@ -3183,7 +3184,7 @@ main() {
                 exit 0
                 ;;
             "-h"|"--help"|"help")
-                usage
+                usage 0
                 ;;
             *)
                 # Not a global option, should be a command

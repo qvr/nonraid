@@ -2151,6 +2151,9 @@ add_disk() {
         if [ ${#short_id} -gt 33 ]; then
             short_id="${short_id:0:30}..."
         fi
+        if [ -z "$short_id" ]; then
+            short_id=$(echo -e "${RED}No disk ID found - cannot use${NC}")
+        fi
 
         printf "  %-2d  %-10s  %-8s  %s\n" \
             "$device_index" \

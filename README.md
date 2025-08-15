@@ -14,6 +14,33 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 >
 > Use at your own risk, and always have backups!
 
+## Table of Contents
+
+- [Kernel support matrix](#kernel-support-matrix)
+- [Installation](#installation)
+  - [Option 1: Install from PPA](#option-1-install-from-ppa)
+  - [Option 2: Install from GitHub Releases](#option-2-install-from-github-releases)
+  - [Option 3: Fully manual installation from repository source](#option-3-fully-manual-installation-from-repository-source)
+  - [Post-installation steps](#post-installation-steps)
+- [Array Management](#array-management)
+  - [Display array status](#display-array-status)
+  - [Create a new array (interactive)](#create-a-new-array-interactive)
+  - [Start/stop the array](#startstop-the-array)
+  - [Import all disks to the array without starting](#import-all-disks-to-the-array-without-starting)
+  - [Add a new disk (interactive)](#add-a-new-disk-interactive)
+  - [Replace a disk (interactive)](#replace-a-disk-interactive)
+  - [Unassign a disk from a slot](#unassign-a-disk-from-a-slot)
+  - [Mount all data disks](#mount-all-data-disks)
+  - [Unmount all data disks](#unmount-all-data-disks)
+  - [Start/stop a parity check](#startstop-a-parity-check)
+  - [Set array settings](#set-array-settings)
+  - [Reload the nonraid module](#reload-the-nonraid-module)
+  - [Using a custom superblock file location](#using-a-custom-superblock-file-location)
+- [Manual Management (Using Driver Interface)](#manual-management-using-driver-interface)
+- [Caveats](#caveats)
+- [Plans](#plans)
+- [License](#license)
+- [Disclaimer](#disclaimer)
 
 ## Kernel support matrix
 
@@ -98,9 +125,9 @@ The command line [nmdctl tool](tools/nmdctl) handles common NonRAID array operat
 
 Displays the status of the array and individual disks. Displays detected filesystems, mountpoints and filesystem usage. Drive ID's are also displayed if global `--verbose` option is set.
 ```bash
-sudo nmdctl status
+sudo nmdctl [--no-color] status [--verbose] [--cron]
 ```
-Exits with an error code if there are any issues with the array, so this can be used as a simple monitoring in a cronjob. (Global `--no-color` option disables `nmdctl` colored output, making it more suitable for cron emails.)
+Exits with an error code if there are any issues with the array, so this can be used as a simple monitoring in a cronjob. `--cron` option can be used to skip displaying filesystem information, making the status check slightly more faster. Global `--no-color` option disables `nmdctl` colored output, making it more suitable for cron emails.
 
 ### Create a new array (interactive)
 
@@ -178,16 +205,16 @@ sudo nmdctl unmount
 
 ### Start/stop a parity check
 
-This will also start reconstruction or clear operations depending on the array state, user confirmation is required if a normal parity check is not being started. In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`).
+This will also start reconstruction or clear operations depending on the array state, user confirmation is required if a normal parity check is not being started. In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`), this is recommended for scheduled parity checks (like a cronjob).
 ```bash
-sudo nmdctl check/nocheck OPTION
+sudo nmdctl check OPTION
 ```
 Where `OPTION` can be:
 - `CORRECT` - start a corrective parity check, this is the default if no option is given
 - `NOCORRECT` - start a check-only parity check, this is the default in unattended mode
-- `RESUME` - resume a previously started parity check
-- `CANCEL` - (for `nocheck`) cancel a running parity check
-- `PAUSE` - (for `nocheck`) pause a running parity check
+- `RESUME` - resume a previously paused parity check
+- `CANCEL` - cancel a running parity check
+- `PAUSE` - pause a running parity check
 
 ### Set array settings
 
@@ -209,8 +236,8 @@ Commands will load the driver module automatically if it is not loaded already, 
 ```bash
 sudo nmdctl -s /path/to/superblock.dat reload
 ```
-
-For more details, run `sudo nmdctl --help`
+> [!TIP]
+> If you change the default superblock location, you should also change it in `/etc/default/nonraid`, as the systemd service will otherwise continue to use the default path when starting the array at boot.
 
 ## Manual Management (Using Driver Interface)
 If you need to interact with the raw kernel driver (for troubleshooting, development, or to understand what `nmdctl` is doing under the hood), details on the driver interface can be found in: [docs/manual-management.md](docs/manual-management.md).

@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.9.0
+VERSION=1.10.0
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -27,9 +27,10 @@ SUPERBLOCK_PATH=""
 # LUKS keyfile path
 LUKS_KEYFILE="/etc/nonraid/luks-keyfile"
 
-# verbose & unattended
+# verbose, unattended and cron modes
 VERBOSE=0
 UNATTENDED=0
+CRON=0
 
 # Global associative array for nmdstat values
 declare -A NMDSTAT_VALUES
@@ -41,7 +42,7 @@ usage() {
     echo "Usage: nmdctl [GLOBAL OPTIONS] COMMAND [COMMAND OPTIONS]"
     echo ""
     echo "Commands:"
-    echo "  status                      Show current array status"
+    echo "  status [-v] [--cron]        Show current array status, --cron will not show filesystem information"
     echo "  create                      Create a new array with interactive disk assignment"
     echo "  start                       Start the array"
     echo "  stop                        Stop the array"
@@ -50,8 +51,7 @@ usage() {
     echo "  replace SLOT                Replace a disk in the specified slot"
     echo "  unassign SLOT               Unassign a disk from the specified slot"
     echo "  reload                      Reload nonraid module with specified superblock"
-    echo "  check [OPTION]              Start parity check (CORRECT (default), NOCORRECT or RESUME)"
-    echo "  nocheck [CANCEL|PAUSE]      Stop parity check (CANCEL or PAUSE)"
+    echo "  check [OPTION]              Start or stop parity check (CORRECT (default), NOCORRECT, or PAUSE, RESUME, CANCEL)"
     echo "  set [SETTING] [VALUE]       Set array settings, use 'nmdctl set' for list of available settings"
     echo "  mount [MOUNTPREFIX]         Mount all active data disks (default prefix: /mnt/disk)"
     echo "  unmount                     Unmount all active data disks"
@@ -247,6 +247,39 @@ format_array_state() {
             echo "$state"
             ;;
     esac
+}
+
+format_available_devices() {
+    local available_devices=("$@")
+    echo -e "Available devices:"
+    echo ""
+    echo -e "  #   Device      Size(GB)  ID"
+    echo -e "  --  ----------  --------  ---------------------------------"
+
+    local device_index=1
+    for device_info in "${available_devices[@]}"; do
+        IFS='|' read -r dev partition size_kb size_gb disk_id <<< "$device_info"
+
+        # Show shortened disk ID for clarity
+        local short_id="${disk_id}"
+        if [ ${#short_id} -gt 33 ]; then
+            short_id="${short_id:0:30}..."
+        fi
+
+        if [ -z "$short_id" ]; then
+            short_id=$(echo -e "${RED}No disk ID found - cannot use in array${NC}")
+        fi
+
+        printf "  %-2d  %-10s  %-8s  %s\n" \
+            "$device_index" \
+            "$(basename "$dev")" \
+            "$size_gb" \
+            "$short_id"
+
+        device_index=$((device_index + 1))
+    done
+
+    echo ""
 }
 
 # Check if the nonraid driver is in an inconsistent state
@@ -503,6 +536,24 @@ show_status() {
     if ! check_nmdstat_exists; then
         return 1
     fi
+
+    # Parse our options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            "-v"|"--verbose")
+                VERBOSE=1
+                shift
+                ;;
+            "--cron")
+                CRON=1
+                shift
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown option for ${YELLOW}nmdctl status${NC}: $1${NC}"
+                return 1
+                ;;
+        esac
+    done
 
     echo "=== NonRAID Array Status ==="
     echo ""
@@ -800,7 +851,8 @@ display_disk_entry() {
 
         [ -n "$slottype" ] && mountpoint="-"
         # Get filesystem type and mountpoint for data disks when array is started
-        if [ -n "$diskname" ] && [ "$diskname" != "none" ]; then
+        # Skip FS checks in cron mode, they are just informational and not useful for alerting
+        if [ -n "$diskname" ] && [ "$diskname" != "none" ] && [ "$CRON" -eq 0 ]; then
             # Check if device exists before calling blkid
             if [ -b "/dev/$diskname" ]; then
                 fs_type=$(get_fs_type "/dev/$diskname")
@@ -815,6 +867,11 @@ display_disk_entry() {
                     mountpoint="unmounted"
                 fi
             fi
+        fi
+
+        if [ "$CRON" -eq 1 ]; then
+            mountpoint="-"
+            fs_type="-"
         fi
 
         # Include disk name, filesystem, mountpoint and usage columns when array is started
@@ -1481,8 +1538,8 @@ stop_array() {
     return 0
 }
 
-# Start parity check
-start_check() {
+# Handle resync actions
+handle_check() {
     local option="${1:-CORRECT}"
     check_root
 
@@ -1507,8 +1564,29 @@ start_check() {
 
     local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
 
+    # Handle stopping or pausing resync action
+    if [[ "${option^^}" == "PAUSE" ]] || [[ "${option^^}" == "CANCEL" ]]; then
+        if [[ "$mdresync" -eq 0 ]]; then
+            echo -e "${YELLOW}Warning: No resync operation is currently running${NC}"
+            return 0
+        fi
+        echo "$([[ "${option^^}" != "PAUSE" ]] && echo "Stopping" || echo "Pausing") $friendly_action..."
+        if ! run_nmd_command "nocheck $option"; then
+            echo -e "${RED}Error: Failed to $([[ "${option^^}" != "PAUSE" ]] && echo "stop" || echo "pause") $friendly_action${NC}"
+            return 1
+        fi
+
+        echo -e "${GREEN}$friendly_action $([[ "${option^^}" != "PAUSE" ]] && echo "stopped" || echo "paused")${NC}"
+        return 0
+    fi
+
     if [[ "$mdresync" -gt 0 ]] && [[ "$mdresyncpos" -gt 0 ]]; then
         echo -e "${RED}Error: Resync operation $friendly_action is already in progress${NC}"
+        return 1
+    fi
+
+    if [[ "${option^^}" == "RESUME" ]] &&  [[ "$mdresyncpos" -eq 0 ]]; then
+        echo -e "${YELLOW}Warning: No paused resync operation to resume${NC}"
         return 1
     fi
 
@@ -1560,35 +1638,6 @@ start_check() {
     fi
 
     echo -e "${GREEN}$friendly_action $([[ "${option^^}" != "RESUME" ]] && echo "started" || echo "resumed")${NC}"
-    return 0
-}
-
-# Stop parity check
-stop_check() {
-    local option="${1:-CANCEL}"
-    check_root
-
-    if ! check_nmdstat_exists; then
-        return 1
-    fi
-
-    local mdstate=$(get_nmdstat_value "mdState")
-    local mdresyncaction=$(get_nmdstat_value "mdResyncAction")
-    local mdresynccorr=$(get_nmdstat_value "mdResyncCorr")
-
-    if [ "$mdstate" != "STARTED" ]; then
-        echo -e "${RED}Error: Array must be started to stop parity check${NC}"
-        return 1
-    fi
-
-    local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
-    echo "$([[ "${option^^}" != "PAUSE" ]] && echo "Stopping" || echo "Pausing") $friendly_action..."
-    if ! run_nmd_command "nocheck $option"; then
-        echo -e "${RED}Error: Failed to $([[ "${option^^}" != "PAUSE" ]] && echo "stop" || echo "pause") $friendly_action${NC}"
-        return 1
-    fi
-
-    echo -e "${GREEN}$friendly_action $([[ "${option^^}" != "PAUSE" ]] && echo "stopped" || echo "paused")${NC}"
     return 0
 }
 
@@ -1700,6 +1749,8 @@ create_array() {
     echo -e "Found ${GREEN}${#available_devices[@]}${NC} suitable devices with partitions"
     echo ""
 
+    format_available_devices "${available_devices[@]}"
+
     # Ask for array label
     local array_label=""
     read -r -p "Enter a label for the array (optional): " array_label
@@ -1731,6 +1782,7 @@ create_array() {
         else
             echo -e "ID: Unknown"
             echo -e "${RED}No disk ID found for this device - unable to use it in the array${NC}"
+            read -r -p "Press enter to continue..." _
             continue
         fi
         echo ""
@@ -1834,11 +1886,8 @@ create_array() {
                 # Import disk to slot
                 echo -e "Importing disk to slot $slot: ${BLUE}$(basename "$partition")${NC}"
 
-                # Get disk ID (use device path if no ID)
-                local id_to_use="${disk_id:-$(basename "$dev")}"
-
                 # Import disk: slot, partition, offset, size, erased, id
-                if ! run_nmd_command "import $slot $(basename "$partition") 0 $size_kb 0 $id_to_use"; then
+                if ! run_nmd_command "import $slot $(basename "$partition") 0 $size_kb 0 $disk_id"; then
                     echo -e "${RED}Error: Failed to import disk to slot $slot${NC}"
                 else
                     echo -e "${GREEN}Successfully imported disk to slot $slot${NC}"
@@ -2129,31 +2178,7 @@ add_disk() {
     local selected_size_gb=0
     local selected_disk_id=""
 
-    echo -e "Available devices:"
-    echo ""
-    echo -e "  #   Device      Size(GB)  ID"
-    echo -e "  --  ----------  --------  ---------------------------------"
-
-    local device_index=1
-    for device_info in "${available_devices[@]}"; do
-        IFS='|' read -r dev partition size_kb size_gb disk_id <<< "$device_info"
-
-        # Show shortened disk ID for clarity
-        local short_id="${disk_id}"
-        if [ ${#short_id} -gt 33 ]; then
-            short_id="${short_id:0:30}..."
-        fi
-
-        printf "  %-2d  %-10s  %-8s  %s\n" \
-            "$device_index" \
-            "$(basename "$dev")" \
-            "$size_gb" \
-            "$short_id"
-
-        device_index=$((device_index + 1))
-    done
-
-    echo ""
+    format_available_devices "${available_devices[@]}"
 
     # Select device
     while true; do
@@ -2274,11 +2299,8 @@ add_disk() {
         reload_done=1
     fi
 
-    # Get disk ID (use device path if no ID)
-    local id_to_use="${selected_disk_id:-$(basename "$selected_dev")}"
-
     # Import disk: slot, partition, offset, size, erased, id
-    if ! run_nmd_command "import $selected_slot $(basename "$selected_partition") 0 $selected_size_kb 0 $id_to_use"; then
+    if ! run_nmd_command "import $selected_slot $(basename "$selected_partition") 0 $selected_size_kb 0 $selected_disk_id"; then
         echo -e "${RED}Error: Failed to add disk to slot $selected_slot${NC}"
         return 1
     fi
@@ -3119,6 +3141,10 @@ main() {
                 UNATTENDED=1
                 shift
                 ;;
+            "--cron")
+                CRON=1
+                shift
+                ;;
             "--no-color")
                 RED=""
                 GREEN=""
@@ -3152,11 +3178,7 @@ main() {
 
     case "$command" in
         "status")
-            if [ "$1" = "--verbose" ] || [ "$1" = "-v" ]; then
-                VERBOSE=1
-                shift
-            fi
-            show_status
+            show_status "$@"
             ;;
         "create")
             create_array
@@ -3187,10 +3209,11 @@ main() {
             reload_module
             ;;
         "check")
-            start_check "$1"
+            handle_check "$1"
             ;;
         "nocheck")
-            stop_check "$1"
+            # separate command kept for backwards compatibility
+            handle_check "${1:-CANCEL}"
             ;;
         "mount")
             if [ "$1" = "-k" ] || [ "$1" = "--key-file" ]; then

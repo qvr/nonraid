@@ -27,9 +27,10 @@ SUPERBLOCK_PATH=""
 # LUKS keyfile path
 LUKS_KEYFILE="/etc/nonraid/luks-keyfile"
 
-# verbose & unattended
+# verbose, unattended and cron modes
 VERBOSE=0
 UNATTENDED=0
+CRON=0
 
 # Global associative array for nmdstat values
 declare -A NMDSTAT_VALUES
@@ -41,7 +42,7 @@ usage() {
     echo "Usage: nmdctl [GLOBAL OPTIONS] COMMAND [COMMAND OPTIONS]"
     echo ""
     echo "Commands:"
-    echo "  status                      Show current array status"
+    echo "  status [-v] [--cron]        Show current array status, --cron will not show filesystem information"
     echo "  create                      Create a new array with interactive disk assignment"
     echo "  start                       Start the array"
     echo "  stop                        Stop the array"
@@ -503,6 +504,24 @@ show_status() {
         return 1
     fi
 
+    # Parse our options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            "-v"|"--verbose")
+                VERBOSE=1
+                shift
+                ;;
+            "--cron")
+                CRON=1
+                shift
+                ;;
+            *)
+                echo -e "${RED}Error: Unknown option for ${YELLOW}nmdctl status${NC}: $1${NC}"
+                return 1
+                ;;
+        esac
+    done
+
     echo "=== NonRAID Array Status ==="
     echo ""
 
@@ -799,7 +818,8 @@ display_disk_entry() {
 
         [ -n "$slottype" ] && mountpoint="-"
         # Get filesystem type and mountpoint for data disks when array is started
-        if [ -n "$diskname" ] && [ "$diskname" != "none" ]; then
+        # Skip FS checks in cron mode, they are just informational and not useful for alerting
+        if [ -n "$diskname" ] && [ "$diskname" != "none" ] && [ "$CRON" -eq 0 ]; then
             # Check if device exists before calling blkid
             if [ -b "/dev/$diskname" ]; then
                 fs_type=$(get_fs_type "/dev/$diskname")
@@ -814,6 +834,11 @@ display_disk_entry() {
                     mountpoint="unmounted"
                 fi
             fi
+        fi
+
+        if [ "$CRON" -eq 1 ]; then
+            mountpoint="-"
+            fs_type="-"
         fi
 
         # Include disk name, filesystem, mountpoint and usage columns when array is started
@@ -3105,6 +3130,10 @@ main() {
                 UNATTENDED=1
                 shift
                 ;;
+            "--cron")
+                CRON=1
+                shift
+                ;;
             "--no-color")
                 RED=""
                 GREEN=""
@@ -3138,11 +3167,7 @@ main() {
 
     case "$command" in
         "status")
-            if [ "$1" = "--verbose" ] || [ "$1" = "-v" ]; then
-                VERBOSE=1
-                shift
-            fi
-            show_status
+            show_status "$@"
             ;;
         "create")
             create_array

@@ -1845,11 +1845,8 @@ create_array() {
                 # Import disk to slot
                 echo -e "Importing disk to slot $slot: ${BLUE}$(basename "$partition")${NC}"
 
-                # Get disk ID (use device path if no ID)
-                local id_to_use="${disk_id:-$(basename "$dev")}"
-
                 # Import disk: slot, partition, offset, size, erased, id
-                if ! run_nmd_command "import $slot $(basename "$partition") 0 $size_kb 0 $id_to_use"; then
+                if ! run_nmd_command "import $slot $(basename "$partition") 0 $size_kb 0 $disk_id"; then
                     echo -e "${RED}Error: Failed to import disk to slot $slot${NC}"
                 else
                     echo -e "${GREEN}Successfully imported disk to slot $slot${NC}"
@@ -2285,11 +2282,8 @@ add_disk() {
         reload_done=1
     fi
 
-    # Get disk ID (use device path if no ID)
-    local id_to_use="${selected_disk_id:-$(basename "$selected_dev")}"
-
     # Import disk: slot, partition, offset, size, erased, id
-    if ! run_nmd_command "import $selected_slot $(basename "$selected_partition") 0 $selected_size_kb 0 $id_to_use"; then
+    if ! run_nmd_command "import $selected_slot $(basename "$selected_partition") 0 $selected_size_kb 0 $selected_disk_id"; then
         echo -e "${RED}Error: Failed to add disk to slot $selected_slot${NC}"
         return 1
     fi

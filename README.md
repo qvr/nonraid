@@ -14,6 +14,33 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 >
 > Use at your own risk, and always have backups!
 
+## Table of Contents
+
+- [Kernel support matrix](#kernel-support-matrix)
+- [Installation](#installation)
+  - [Option 1: Install from PPA](#option-1-install-from-ppa)
+  - [Option 2: Install from GitHub Releases](#option-2-install-from-github-releases)
+  - [Option 3: Fully manual installation from repository source](#option-3-fully-manual-installation-from-repository-source)
+  - [Post-installation steps](#post-installation-steps)
+- [Array Management](#array-management)
+  - [Display array status](#display-array-status)
+  - [Create a new array (interactive)](#create-a-new-array-interactive)
+  - [Start/stop the array](#startstop-the-array)
+  - [Import all disks to the array without starting](#import-all-disks-to-the-array-without-starting)
+  - [Add a new disk (interactive)](#add-a-new-disk-interactive)
+  - [Replace a disk (interactive)](#replace-a-disk-interactive)
+  - [Unassign a disk from a slot](#unassign-a-disk-from-a-slot)
+  - [Mount all data disks](#mount-all-data-disks)
+  - [Unmount all data disks](#unmount-all-data-disks)
+  - [Start/stop a parity check](#startstop-a-parity-check)
+  - [Set array settings](#set-array-settings)
+  - [Reload the nonraid module](#reload-the-nonraid-module)
+  - [Using a custom superblock file location](#using-a-custom-superblock-file-location)
+- [Manual Management (Using Driver Interface)](#manual-management-using-driver-interface)
+- [Caveats](#caveats)
+- [Plans](#plans)
+- [License](#license)
+- [Disclaimer](#disclaimer)
 
 ## Kernel support matrix
 

@@ -35,6 +35,9 @@ CRON=0
 # Global associative array for nmdstat values
 declare -A NMDSTAT_VALUES
 
+# Driver stats interface, override for mock tests
+PROC_NMDSTAT="${PROC_NMDSTAT:-/proc/nmdstat}"
+
 # Display usage information
 usage() {
     local exit_code="${1:-1}"
@@ -101,7 +104,7 @@ check_module_loaded() {
     # Check if module is already loaded
     if lsmod | grep -q nonraid; then
         # For create_array, verify the module is using the correct superblock
-        if [ "$is_create_command" -eq 1 ] && [ -f /proc/nmdstat ]; then
+        if [ "$is_create_command" -eq 1 ] && [ -f "$PROC_NMDSTAT" ]; then
             # Get all nmdstat values if we haven't already
             if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
                 get_all_nmdstat_values NMDSTAT_VALUES
@@ -151,7 +154,7 @@ check_module_loaded() {
 
 # Check if /proc/nmdstat exists
 check_nmdstat_exists() {
-    if [ ! -f /proc/nmdstat ]; then
+    if [ ! -f "$PROC_NMDSTAT" ]; then
         # Clear the NMDSTAT_VALUES array since /proc/nmdstat doesn't exist
         for key in "${!NMDSTAT_VALUES[@]}"; do
             unset 'NMDSTAT_VALUES["$key"]'
@@ -163,7 +166,7 @@ check_nmdstat_exists() {
         fi
 
         # Check again after attempted load
-        if [ ! -f /proc/nmdstat ]; then
+        if [ ! -f "$PROC_NMDSTAT" ]; then
             echo -e "${RED}Error: /proc/nmdstat not found${NC}"
             echo -e "Please ensure the nonraid module is properly loaded"
             return 1
@@ -186,7 +189,7 @@ get_all_nmdstat_values() {
     # Read all values from /proc/nmdstat
     while IFS='=' read -r key value; do
         array_ref["$key"]="$value"
-    done < <(cat /proc/nmdstat 2>/dev/null)
+    done < <(cat "$PROC_NMDSTAT" 2>/dev/null)
 
     # Return success only if we read something
     [ ${#array_ref[@]} -gt 0 ]
@@ -194,7 +197,7 @@ get_all_nmdstat_values() {
 
 # Get value from nmdstat (for backward compatibility)
 get_nmdstat_value() {
-    grep -E "^$1=" /proc/nmdstat | cut -d= -f2
+    grep -E "^$1=" "$PROC_NMDSTAT" | cut -d= -f2
 }
 
 # Convert 1k blocks to GB with optional 2 decimal places
@@ -1333,7 +1336,7 @@ import_disks() {
         # Check if disks were already imported (check for any rdevName values)
         local already_imported=0
         # shellcheck disable=SC2013
-        for slot in $(grep -E "^diskId\.[0-9]+" /proc/nmdstat | cut -d'.' -f2 | cut -d'=' -f1); do
+        for slot in $(grep -E "^diskId\.[0-9]+" "$PROC_NMDSTAT" | cut -d'.' -f2 | cut -d'=' -f1); do
             local rdevname=$(get_nmdstat_value "rdevName.$slot")
             if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
                 already_imported=$((already_imported + 1))
@@ -2525,7 +2528,7 @@ reload_module() {
     local superblock=""
 
     # If --super wasn't provided, try to get the current superblock path from nmdstat
-    if [ -z "$SUPERBLOCK_PATH" ] && [ -f /proc/nmdstat ]; then
+    if [ -z "$SUPERBLOCK_PATH" ] && [ -f "$PROC_NMDSTAT" ]; then
         local current_superblock=$(get_nmdstat_value "sbName")
         if [ -n "$current_superblock" ] && [ "$current_superblock" != "(null)" ]; then
             superblock="$current_superblock"
@@ -2574,7 +2577,7 @@ reload_module() {
 
     # Stop array if it's running
     local mdstate=""
-    if [ -f /proc/nmdstat ]; then
+    if [ -f "$PROC_NMDSTAT" ]; then
         mdstate=$(get_nmdstat_value "mdState")
         if [ "$mdstate" = "STARTED" ]; then
             if [ "$quiet_mode" -eq 0 ]; then

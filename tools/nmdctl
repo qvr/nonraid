@@ -33,7 +33,7 @@ UNATTENDED=0
 CRON=0
 
 # Global associative array for nmdstat values
-declare -A NMDSTAT_VALUES
+declare -g -A NMDSTAT_VALUES
 
 # Driver stats interface, override for mock tests
 PROC_NMDSTAT="${PROC_NMDSTAT:-/proc/nmdstat}"

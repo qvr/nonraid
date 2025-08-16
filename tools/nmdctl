@@ -33,10 +33,14 @@ UNATTENDED=0
 CRON=0
 
 # Global associative array for nmdstat values
-declare -A NMDSTAT_VALUES
+declare -g -A NMDSTAT_VALUES
+
+# Driver stats interface, override for mock tests
+PROC_NMDSTAT="${PROC_NMDSTAT:-/proc/nmdstat}"
 
 # Display usage information
 usage() {
+    local exit_code="${1:-1}"
     echo "nmdctl - NonRAID array management utility (v$VERSION)"
     echo ""
     echo "Usage: nmdctl [GLOBAL OPTIONS] COMMAND [COMMAND OPTIONS]"
@@ -65,7 +69,7 @@ usage() {
     echo "  -V, --version               Display version information"
     echo "  -h, --help                  Display this help message"
     echo ""
-    exit 1
+    exit "$exit_code"
 }
 
 # Check if running as root
@@ -100,7 +104,7 @@ check_module_loaded() {
     # Check if module is already loaded
     if lsmod | grep -q nonraid; then
         # For create_array, verify the module is using the correct superblock
-        if [ "$is_create_command" -eq 1 ] && [ -f /proc/nmdstat ]; then
+        if [ "$is_create_command" -eq 1 ] && [ -f "$PROC_NMDSTAT" ]; then
             # Get all nmdstat values if we haven't already
             if [ ${#NMDSTAT_VALUES[@]} -eq 0 ]; then
                 get_all_nmdstat_values NMDSTAT_VALUES
@@ -150,7 +154,7 @@ check_module_loaded() {
 
 # Check if /proc/nmdstat exists
 check_nmdstat_exists() {
-    if [ ! -f /proc/nmdstat ]; then
+    if [ ! -f "$PROC_NMDSTAT" ]; then
         # Clear the NMDSTAT_VALUES array since /proc/nmdstat doesn't exist
         for key in "${!NMDSTAT_VALUES[@]}"; do
             unset 'NMDSTAT_VALUES["$key"]'
@@ -162,7 +166,7 @@ check_nmdstat_exists() {
         fi
 
         # Check again after attempted load
-        if [ ! -f /proc/nmdstat ]; then
+        if [ ! -f "$PROC_NMDSTAT" ]; then
             echo -e "${RED}Error: /proc/nmdstat not found${NC}"
             echo -e "Please ensure the nonraid module is properly loaded"
             return 1
@@ -185,7 +189,7 @@ get_all_nmdstat_values() {
     # Read all values from /proc/nmdstat
     while IFS='=' read -r key value; do
         array_ref["$key"]="$value"
-    done < <(cat /proc/nmdstat 2>/dev/null)
+    done < <(cat "$PROC_NMDSTAT" 2>/dev/null)
 
     # Return success only if we read something
     [ ${#array_ref[@]} -gt 0 ]
@@ -193,7 +197,21 @@ get_all_nmdstat_values() {
 
 # Get value from nmdstat (for backward compatibility)
 get_nmdstat_value() {
-    grep -E "^$1=" /proc/nmdstat | cut -d= -f2
+    grep -E "^$1=" "$PROC_NMDSTAT" | cut -d= -f2
+}
+
+# Convert 1k blocks to GB with optional 2 decimal places
+convert_blocks_to_gb() {
+    local blocks="$1"
+    local digits="${2:-0}"
+    if [ "$digits" -gt 0 ]; then
+        local gb_int=$(( blocks * 100 / 1048576 ))
+        local gb_whole=$(( gb_int / 100 ))
+        local gb_frac=$(( gb_int % 100 ))
+        echo "${gb_whole}.$(printf "%02d" $gb_frac)"
+    else
+        echo $(( (blocks + 1048575) / 1048576 ))
+    fi
 }
 
 # Format disk status with color - returns colored text with consistent visible width
@@ -602,7 +620,7 @@ show_array_size_and_parity() {
     local parity_disk_size="${NMDSTAT_VALUES[diskSize.0]}"
     if [ -n "$parity_disk_size" ] && [ "$parity_disk_size" -gt 0 ]; then
         has_parity=true
-        parity_size_gb=$(( (parity_disk_size + 1048575) / 1048576 ))
+        parity_size_gb=$(convert_blocks_to_gb "$parity_disk_size")
     fi
 
     # Check P state
@@ -615,7 +633,7 @@ show_array_size_and_parity() {
     local second_parity_disk_size="${NMDSTAT_VALUES[diskSize.29]}"
     if [ -n "$second_parity_disk_size" ] && [ "$second_parity_disk_size" -gt 0 ]; then
         has_second_parity=true
-        second_parity_size_gb=$(( (second_parity_disk_size + 1048575) / 1048576 ))
+        second_parity_size_gb=$(convert_blocks_to_gb "$second_parity_disk_size")
     fi
 
     # Check Q state
@@ -627,13 +645,17 @@ show_array_size_and_parity() {
 
     # Count data disks and sum their sizes
     local data_disk_count=0
+    local data_size_kb=0
     for slot in $(seq 1 28); do
         local disk_size="${NMDSTAT_VALUES[diskSize.$slot]}"
         if [ -n "$disk_size" ] && [ "$disk_size" -gt 0 ]; then
             data_disk_count=$((data_disk_count + 1))
-            data_size_gb=$((data_size_gb + (disk_size + 1048575) / 1048576))
+            data_size_kb=$((data_size_kb + disk_size))
         fi
     done
+
+    # Convert total data size to GB
+    data_size_gb=$(convert_blocks_to_gb "$data_size_kb")
 
     # Display array size information
     echo -e "Array Size    : ${data_size_gb} GB (${data_disk_count} data disk(s))"
@@ -674,9 +696,12 @@ show_resync_status() {
         # Format the resync action to be user-friendly
         local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
 
+        local pos_gb=$(convert_blocks_to_gb "$mdresyncpos" 2)
+        local size_gb=$(convert_blocks_to_gb "$mdresyncsize" 0)
+
         echo ""
         echo -e "Operation     : ${BLUE}$friendly_action${NC} ${YELLOW}(PAUSED)${NC}"
-        echo -e "Progress      : $progress% ($mdresyncpos/$mdresyncsize blocks)"
+        echo -e "Progress      : $progress% ($pos_gb/$size_gb GB)"
         echo -e "${YELLOW}Resume with   : '${GREEN}nmdctl check resume${YELLOW}' command${NC}"
     # Check for pending disk clearing
     elif [ "$mdresync" = "0" ] && [ "$mdresyncaction" = "clear" ]; then
@@ -728,9 +753,12 @@ show_resync_status() {
         # Format the resync action to be user-friendly
         local friendly_action=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
 
+        local pos_gb=$(convert_blocks_to_gb "$mdresyncpos" 2)
+        local size_gb=$(convert_blocks_to_gb "$mdresyncsize" 0)
+
         echo ""
         echo -e "Operation     : ${BLUE}$friendly_action${NC}"
-        echo -e "Progress      : $progress% ($mdresyncpos/$mdresyncsize blocks)"
+        echo -e "Progress      : $progress% ($pos_gb/$size_gb GB)"
         echo -e "Speed         : $rate_mb MB/s"
         echo -e "Elapsed Time  : $elapsed_formatted"
         echo -e "ETA           : $eta_formatted"
@@ -824,7 +852,7 @@ display_disk_entry() {
     # Convert size to GB
     local sizegb=0
     if [ -n "$disksize" ] && [ "$disksize" -gt 0 ]; then
-        sizegb=$(( (disksize + 1048575) / 1048576 ))
+        sizegb=$(convert_blocks_to_gb "$disksize")
     fi
 
     local status_formatted=$(format_disk_status "$rdevstatus")
@@ -1308,7 +1336,7 @@ import_disks() {
         # Check if disks were already imported (check for any rdevName values)
         local already_imported=0
         # shellcheck disable=SC2013
-        for slot in $(grep -E "^diskId\.[0-9]+" /proc/nmdstat | cut -d'.' -f2 | cut -d'=' -f1); do
+        for slot in $(grep -E "^diskId\.[0-9]+" "$PROC_NMDSTAT" | cut -d'.' -f2 | cut -d'=' -f1); do
             local rdevname=$(get_nmdstat_value "rdevName.$slot")
             if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
                 already_imported=$((already_imported + 1))
@@ -1555,6 +1583,7 @@ handle_check() {
     local mdresyncaction=${NMDSTAT_VALUES[mdResyncAction]}
     local mdresynccorr=${NMDSTAT_VALUES[mdResyncCorr]}
     local mdresyncpos=${NMDSTAT_VALUES[mdResyncPos]}
+    local mdresyncsize=${NMDSTAT_VALUES[mdResyncSize]}
     local mdresync=${NMDSTAT_VALUES[mdResync]}
 
     if [ "$mdstate" != "STARTED" ]; then
@@ -1592,7 +1621,7 @@ handle_check() {
 
     # Check if a previous resync operation is paused, and we were not called with resume
     if [[ "$mdresync" -eq 0 ]] && [[ "$mdresyncpos" -gt 0 ]] && [[ "${option^^}" != "RESUME" ]]; then
-        echo -e "${YELLOW}Warning: Previous resync operation $friendly_action is currently paused at position $mdresyncpos${NC}"
+        echo -e "${YELLOW}Warning: Previous resync operation $friendly_action is currently paused at $(( mdresyncpos * 100 / mdresyncsize ))%${NC}"
         echo -e "${YELLOW}You can resume it with ${GREEN}nmdctl check RESUME${NC}"
         read -r -p "Are you sure you want to start a new operation without resuming? (y/N): " confirm
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -1658,7 +1687,7 @@ list_available_devices() {
             local size_kb=$(get_disk_size_kb "$partition")
             local size_gb=0
             if [ -n "$size_kb" ] && [ "$size_kb" -gt 0 ]; then
-                size_gb=$(( (size_kb + 1048575) / 1048576 ))
+                size_gb=$(convert_blocks_to_gb "$size_kb")
             fi
 
             # Add to available devices
@@ -2399,9 +2428,9 @@ unassign_disk() {
 
     # Calculate size in GB if available
     if [ -n "$disk_size" ] && [ "$disk_size" -gt 0 ]; then
-        size_gb=$(( (disk_size + 1048575) / 1048576 ))
+        size_gb=$(convert_blocks_to_gb "$disk_size")
     elif [ -n "$rdev_size" ] && [ "$rdev_size" -gt 0 ]; then
-        size_gb=$(( (rdev_size + 1048575) / 1048576 ))
+        size_gb=$(convert_blocks_to_gb "$rdev_size")
     fi
 
     # Format the slot name for display
@@ -2499,7 +2528,7 @@ reload_module() {
     local superblock=""
 
     # If --super wasn't provided, try to get the current superblock path from nmdstat
-    if [ -z "$SUPERBLOCK_PATH" ] && [ -f /proc/nmdstat ]; then
+    if [ -z "$SUPERBLOCK_PATH" ] && [ -f "$PROC_NMDSTAT" ]; then
         local current_superblock=$(get_nmdstat_value "sbName")
         if [ -n "$current_superblock" ] && [ "$current_superblock" != "(null)" ]; then
             superblock="$current_superblock"
@@ -2548,7 +2577,7 @@ reload_module() {
 
     # Stop array if it's running
     local mdstate=""
-    if [ -f /proc/nmdstat ]; then
+    if [ -f "$PROC_NMDSTAT" ]; then
         mdstate=$(get_nmdstat_value "mdState")
         if [ "$mdstate" = "STARTED" ]; then
             if [ "$quiet_mode" -eq 0 ]; then
@@ -3158,7 +3187,7 @@ main() {
                 exit 0
                 ;;
             "-h"|"--help"|"help")
-                usage
+                usage 0
                 ;;
             *)
                 # Not a global option, should be a command
@@ -3242,4 +3271,6 @@ main() {
 }
 
 # Run main function
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

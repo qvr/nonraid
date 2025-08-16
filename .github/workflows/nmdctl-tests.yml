@@ -1,0 +1,53 @@
+name: nmdctl CI Tests
+
+on:
+  pull_request:
+    paths:
+      - 'tools/nmdctl'
+      - '.github/workflows/nmdctl-tests.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'tools/nmdctl'
+
+jobs:
+  static-analysis:
+    runs-on: ubuntu-latest
+    name: Static Analysis & Linting
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        run: |
+          echo "Running ShellCheck on nmdctl..."
+          shellcheck -x tools/nmdctl
+
+      - name: Check bash syntax
+        run: |
+          echo "Checking bash syntax..."
+          bash -n tools/nmdctl
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    name: Unit Tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats util-linux
+
+      - name: Run unit tests
+        run: |
+          cd tools
+          chmod +x nmdctl
+          chmod +x tests/*
+          bats tests/

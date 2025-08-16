@@ -1,0 +1,183 @@
+name: NonRAID DKMS Build Tests
+
+on:
+  pull_request:
+    paths:
+      - 'md_nonraid/**'
+      - 'raid6/**'
+      - 'dkms.conf'
+      - 'Makefile'
+      - '.github/workflows/dkms-tests.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'md_nonraid/**'
+      - 'raid6/**'
+      - 'dkms.conf'
+      - 'Makefile'
+  schedule:
+    - cron: '0 2 * * 0'
+
+jobs:
+  dkms-build-test:
+    runs-on: ubuntu-latest
+    name: DKMS Build Test ${{ matrix.container.name }}
+
+    strategy:
+      matrix:
+        container:
+          - { name: "Debian 12", image: "debian:12", headers: "linux-headers-amd64" }
+          - { name: "Debian 13", image: "debian:13", headers: "linux-headers-amd64" }
+          - { name: "Ubuntu 24.04", image: "ubuntu:24.04", headers: "linux-headers-generic" }
+          - { name: "Ubuntu 24.04 HWE", image: "ubuntu:24.04", headers: "linux-headers-generic-hwe-24.04" }
+      fail-fast: false
+
+    container:
+      image: ${{ matrix.container.image }}
+
+    steps:
+      - name: Install base dependencies
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y git build-essential dkms
+
+      - uses: actions/checkout@v4
+
+      - name: Extract DKMS version
+        run: |
+          DKMS_VERSION=$(grep "^PACKAGE_VERSION=" dkms.conf | cut -d= -f2)
+          echo "DKMS_VERSION=$DKMS_VERSION" >> $GITHUB_ENV
+          echo "Detected DKMS version: $DKMS_VERSION"
+
+      - name: Install kernel headers
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          # Install the latest available kernel headers
+          apt-get install -y ${{ matrix.container.headers }}
+
+          # Verify headers are installed
+          KVERSION=$(ls /lib/modules/ | head -n1)
+          echo "Using kernel version: $KVERSION"
+          ls -la /lib/modules/$KVERSION/build/ || echo "Build symlink not found"
+          ls -la /usr/src/linux-headers-* || echo "No headers found in /usr/src"
+
+      - name: Prepare DKMS source
+        run: |
+          # Copy source to DKMS source directory
+          DKMS_SRC_DIR="/usr/src/nonraid-dkms-$DKMS_VERSION"
+          mkdir -p "$DKMS_SRC_DIR"
+          cp -r md_nonraid/ raid6/ dkms.conf Makefile "$DKMS_SRC_DIR/"
+
+          echo "DKMS source directory contents:"
+          ls -la "$DKMS_SRC_DIR"
+
+      - name: Add DKMS module
+        run: |
+          dkms add nonraid-dkms/$DKMS_VERSION
+          echo "DKMS status after add:"
+          dkms status
+
+      - name: Build DKMS module
+        run: |
+          KVERSION=$(ls /lib/modules/ | head -n1)
+          echo "Building for kernel version: $KVERSION"
+
+          # Try to build the module
+          dkms build nonraid-dkms/$DKMS_VERSION -k "$KVERSION"
+
+          echo "DKMS status after build:"
+          dkms status
+
+          echo "Built module files:"
+          find /var/lib/dkms/nonraid-dkms/$DKMS_VERSION/ -name "*.ko*" -ls || echo "No .ko files found"
+
+      - name: Verify module compilation
+        run: |
+          KVERSION=$(ls /lib/modules/ | head -n1)
+          MODULE_DIR="/var/lib/dkms/nonraid-dkms/$DKMS_VERSION/$KVERSION/$(uname -m)/module"
+
+          echo "Checking for compiled modules in: $MODULE_DIR"
+
+          # Initialize summary
+          echo "# NonRAID DKMS Build Results for ${{ matrix.container.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Kernel Version:** $KVERSION" >> $GITHUB_STEP_SUMMARY
+          echo "**NonRAID DKMS Version:** $DKMS_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          SUCCESS=true
+
+          # Check for md-nonraid module (compressed or uncompressed)
+          MD_NONRAID_MODULE=$(find "$MODULE_DIR" -name "md-nonraid.ko*" | head -n1)
+          if [ -n "$MD_NONRAID_MODULE" ]; then
+            echo "✓ md-nonraid module found: $(basename "$MD_NONRAID_MODULE")"
+            echo "## ✅ md-nonraid module" >> $GITHUB_STEP_SUMMARY
+            echo "**File:** \`$(basename "$MD_NONRAID_MODULE")\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Try to get modinfo and capture output
+            if MODINFO_OUTPUT=$(modinfo "$MD_NONRAID_MODULE" 2>/dev/null); then
+              echo "Module info available"
+              echo "**Module Information:**" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "$MODINFO_OUTPUT" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "Module info not available (possibly compressed)"
+              echo "**Module Information:** Not available (possibly compressed)" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✗ md-nonraid module not found"
+            echo "## ❌ md-nonraid module" >> $GITHUB_STEP_SUMMARY
+            echo "**Status:** Module not found" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Available files in $MODULE_DIR:**" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            ls -la "$MODULE_DIR" 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Directory not found" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            SUCCESS=false
+          fi
+
+          # Check for raid6_pq module (compressed or uncompressed)
+          RAID6_MODULE=$(find "$MODULE_DIR" -name "raid6_pq.ko*" | head -n1)
+          if [ -n "$RAID6_MODULE" ]; then
+            echo "✓ raid6_pq module found: $(basename "$RAID6_MODULE")"
+            echo "## ✅ raid6_pq module" >> $GITHUB_STEP_SUMMARY
+            echo "**File:** \`$(basename "$RAID6_MODULE")\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            # Try to get modinfo and capture output
+            if MODINFO_OUTPUT=$(modinfo "$RAID6_MODULE" 2>/dev/null); then
+              echo "Module info available"
+              echo "**Module Information:**" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+              echo "$MODINFO_OUTPUT" >> $GITHUB_STEP_SUMMARY
+              echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "Module info not available (possibly compressed)"
+              echo "**Module Information:** Not available (possibly compressed)" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✗ raid6_pq module not found"
+            echo "## ❌ raid6_pq module" >> $GITHUB_STEP_SUMMARY
+            echo "**Status:** Module not found" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Available files in $MODULE_DIR:**" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            ls -la "$MODULE_DIR" 2>/dev/null >> $GITHUB_STEP_SUMMARY || echo "Directory not found" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            SUCCESS=false
+          fi
+
+          # Add overall result
+          if [ "$SUCCESS" = true ]; then
+            echo "## 🎉 Overall Result: SUCCESS" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Overall Result: FAILURE" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi

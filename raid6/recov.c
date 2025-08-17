@@ -13,7 +13,7 @@
  * the syndrome.)
  */
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 
 /* Recover two failed data blocks. */
 static void raid6_2data_recov_intx1(int disks, size_t bytes, int faila,

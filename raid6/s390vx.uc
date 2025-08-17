@@ -11,7 +11,7 @@
  * This file is postprocessed using unroll.awk.
  */
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 #include <asm/fpu/api.h>
 #include <asm/vx-insn.h>
 

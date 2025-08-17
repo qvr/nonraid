@@ -13,7 +13,7 @@
 
 #ifdef CONFIG_X86_32
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 #include "x86.h"
 
 /* Shared with raid6/sse1.c */

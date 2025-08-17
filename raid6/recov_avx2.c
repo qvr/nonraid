@@ -4,7 +4,7 @@
  * Author: Jim Kukunas <james.t.kukunas@linux.intel.com>
  */
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 #include "x86.h"
 
 static int raid6_has_avx2(void)

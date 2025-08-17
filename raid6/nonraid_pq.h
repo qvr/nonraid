@@ -8,8 +8,11 @@
 #ifndef NONRAID_PQ_H
 #define NONRAID_PQ_H
 
-/* Include the original raid6 header for all the types and constants */
-#include <linux/raid/pq.h>
+#include <linux/types.h>
+#include <asm/page.h>
+
+/* Forward declaration - full definition is in nonraid_raid6.h */
+struct raid6_calls;
 
 /* Map the original symbols to the nonraid-exported versions */
 #define raid6_empty_zero_page    nonraid_empty_zero_page
@@ -38,7 +41,7 @@ extern u8 const nonraid_gflog[256];
 extern u8 const nonraid_gfinv[256];
 extern u8 const nonraid_gfexi[256];
 #ifdef CONFIG_SMP
-extern const char nonraid_vgfmul[256][32];
+extern const u8 nonraid_vgfmul[256][32];
 #endif
 
 #endif /* NONRAID_PQ_H */

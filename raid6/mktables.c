@@ -59,7 +59,7 @@ int main(int argc, char *argv[])
 	printf("#ifdef __KERNEL__\n");
 	printf("#include <linux/export.h>\n");
 	printf("#endif\n");
-	printf("#include <linux/raid/pq.h>\n");
+	printf("#include <linux/types.h>\n");
 
 	/* Compute multiplication table */
 	printf("\nconst u8  __attribute__((aligned(256)))\n"

@@ -22,7 +22,7 @@
  * bracked this with preempt_disable/enable or in a lock)
  */
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 
 #ifdef CONFIG_ALTIVEC
 

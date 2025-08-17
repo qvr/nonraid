@@ -141,16 +141,16 @@ jobs:
             SUCCESS=false
           fi
 
-          # Check for raid6_pq module (compressed or uncompressed)
-          RAID6_MODULE=$(find "$MODULE_DIR" -name "raid6_pq.ko*" | head -n1)
-          if [ -n "$RAID6_MODULE" ]; then
-            echo "✓ raid6_pq module found: $(basename "$RAID6_MODULE")"
-            echo "## ✅ raid6_pq module" >> $GITHUB_STEP_SUMMARY
-            echo "**File:** \`$(basename "$RAID6_MODULE")\`" >> $GITHUB_STEP_SUMMARY
+          # Check for nonraid6_pq module (compressed or uncompressed)
+          NONRAID6_MODULE=$(find "$MODULE_DIR" -name "nonraid6_pq.ko*" | head -n1)
+          if [ -n "$NONRAID6_MODULE" ]; then
+            echo "✓ nonraid6_pq module found: $(basename "$NONRAID6_MODULE")"
+            echo "## ✅ nonraid6_pq module" >> $GITHUB_STEP_SUMMARY
+            echo "**File:** \`$(basename "$NONRAID6_MODULE")\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
 
             # Try to get modinfo and capture output
-            if MODINFO_OUTPUT=$(modinfo "$RAID6_MODULE" 2>/dev/null); then
+            if MODINFO_OUTPUT=$(modinfo "$NONRAID6_MODULE" 2>/dev/null); then
               echo "Module info available"
               echo "**Module Information:**" >> $GITHUB_STEP_SUMMARY
               echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
@@ -162,8 +162,8 @@ jobs:
             fi
             echo "" >> $GITHUB_STEP_SUMMARY
           else
-            echo "✗ raid6_pq module not found"
-            echo "## ❌ raid6_pq module" >> $GITHUB_STEP_SUMMARY
+            echo "✗ nonraid6_pq module not found"
+            echo "## ❌ nonraid6_pq module" >> $GITHUB_STEP_SUMMARY
             echo "**Status:** Module not found" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Available files in $MODULE_DIR:**" >> $GITHUB_STEP_SUMMARY

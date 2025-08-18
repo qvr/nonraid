@@ -63,7 +63,7 @@ int main(int argc, char *argv[])
 
 	/* Compute multiplication table */
 	printf("\nconst u8  __attribute__((aligned(256)))\n"
-		"raid6_gfmul[256][256] =\n"
+		"nonraid_gfmul[256][256] =\n"
 		"{\n");
 	for (i = 0; i < 256; i++) {
 		printf("\t{\n");
@@ -77,12 +77,12 @@ int main(int argc, char *argv[])
 	}
 	printf("};\n");
 	printf("#ifdef __KERNEL__\n");
-	printf("EXPORT_SYMBOL(raid6_gfmul);\n");
+	printf("EXPORT_SYMBOL(nonraid_gfmul);\n");
 	printf("#endif\n");
 
 	/* Compute vector multiplication table */
 	printf("\nconst u8  __attribute__((aligned(256)))\n"
-		"raid6_vgfmul[256][32] =\n"
+		"nonraid_vgfmul[256][32] =\n"
 		"{\n");
 	for (i = 0; i < 256; i++) {
 		printf("\t{\n");
@@ -102,13 +102,13 @@ int main(int argc, char *argv[])
 	}
 	printf("};\n");
 	printf("#ifdef __KERNEL__\n");
-	printf("EXPORT_SYMBOL(raid6_vgfmul);\n");
+	printf("EXPORT_SYMBOL(nonraid_vgfmul);\n");
 	printf("#endif\n");
 
 	/* Compute power-of-2 table (exponent) */
 	v = 1;
 	printf("\nconst u8 __attribute__((aligned(256)))\n"
-	       "raid6_gfexp[256] =\n" "{\n");
+	       "nonraid_gfexp[256] =\n" "{\n");
 	for (i = 0; i < 256; i += 8) {
 		printf("\t");
 		for (j = 0; j < 8; j++) {
@@ -121,12 +121,12 @@ int main(int argc, char *argv[])
 	}
 	printf("};\n");
 	printf("#ifdef __KERNEL__\n");
-	printf("EXPORT_SYMBOL(raid6_gfexp);\n");
+	printf("EXPORT_SYMBOL(nonraid_gfexp);\n");
 	printf("#endif\n");
 
 	/* Compute log-of-2 table */
 	printf("\nconst u8 __attribute__((aligned(256)))\n"
-	       "raid6_gflog[256] =\n" "{\n");
+	       "nonraid_gflog[256] =\n" "{\n");
 	for (i = 0; i < 256; i += 8) {
 		printf("\t");
 		for (j = 0; j < 8; j++) {
@@ -141,12 +141,12 @@ int main(int argc, char *argv[])
 	}
 	printf("};\n");
 	printf("#ifdef __KERNEL__\n");
-	printf("EXPORT_SYMBOL(raid6_gflog);\n");
+	printf("EXPORT_SYMBOL(nonraid_gflog);\n");
 	printf("#endif\n");
 
 	/* Compute inverse table x^-1 == x^254 */
 	printf("\nconst u8 __attribute__((aligned(256)))\n"
-	       "raid6_gfinv[256] =\n" "{\n");
+	       "nonraid_gfinv[256] =\n" "{\n");
 	for (i = 0; i < 256; i += 8) {
 		printf("\t");
 		for (j = 0; j < 8; j++) {
@@ -156,12 +156,12 @@ int main(int argc, char *argv[])
 	}
 	printf("};\n");
 	printf("#ifdef __KERNEL__\n");
-	printf("EXPORT_SYMBOL(raid6_gfinv);\n");
+	printf("EXPORT_SYMBOL(nonraid_gfinv);\n");
 	printf("#endif\n");
 
 	/* Compute inv(2^x + 1) (exponent-xor-inverse) table */
 	printf("\nconst u8 __attribute__((aligned(256)))\n"
-	       "raid6_gfexi[256] =\n" "{\n");
+	       "nonraid_gfexi[256] =\n" "{\n");
 	for (i = 0; i < 256; i += 8) {
 		printf("\t");
 		for (j = 0; j < 8; j++)
@@ -170,7 +170,7 @@ int main(int argc, char *argv[])
 	}
 	printf("};\n");
 	printf("#ifdef __KERNEL__\n");
-	printf("EXPORT_SYMBOL(raid6_gfexi);\n");
+	printf("EXPORT_SYMBOL(nonraid_gfexi);\n");
 	printf("#endif\n");
 
 	return 0;

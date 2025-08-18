@@ -8,7 +8,7 @@
 
 #ifdef CONFIG_AS_AVX512
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 #include "x86.h"
 
 static int raid6_has_avx512(void)

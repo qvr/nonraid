@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0
-obj-$(CONFIG_RAID6_PQ)	+= raid6_pq.o
+obj-m	+= nonraid6_pq.o
 
-raid6_pq-y	+= algos.o recov.o tables.o int1.o int2.o int4.o \
+nonraid6_pq-y	+= algos.o recov.o tables.o int1.o int2.o int4.o \
 		   int8.o
 
-raid6_pq-$(CONFIG_X86) += recov_ssse3.o recov_avx2.o mmx.o sse1.o sse2.o avx2.o avx512.o recov_avx512.o
-raid6_pq-$(CONFIG_ALTIVEC) += altivec1.o altivec2.o altivec4.o altivec8.o \
+nonraid6_pq-$(CONFIG_X86) += recov_ssse3.o recov_avx2.o mmx.o sse1.o sse2.o avx2.o avx512.o recov_avx512.o
+nonraid6_pq-$(CONFIG_ALTIVEC) += altivec1.o altivec2.o altivec4.o altivec8.o \
                               vpermxor1.o vpermxor2.o vpermxor4.o vpermxor8.o
-raid6_pq-$(CONFIG_KERNEL_MODE_NEON) += neon.o neon1.o neon2.o neon4.o neon8.o recov_neon.o recov_neon_inner.o
-raid6_pq-$(CONFIG_S390) += s390vx8.o recov_s390xc.o
-raid6_pq-$(CONFIG_LOONGARCH) += loongarch_simd.o recov_loongarch_simd.o
+nonraid6_pq-$(CONFIG_KERNEL_MODE_NEON) += neon.o neon1.o neon2.o neon4.o neon8.o recov_neon.o recov_neon_inner.o
+nonraid6_pq-$(CONFIG_S390) += s390vx8.o recov_s390xc.o
+nonraid6_pq-$(CONFIG_LOONGARCH) += loongarch_simd.o recov_loongarch_simd.o
 
 hostprogs	+= mktables
 

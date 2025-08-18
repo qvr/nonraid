@@ -5,7 +5,7 @@
  * Copyright (C) 2013 Linaro Ltd <ard.biesheuvel@linaro.org>
  */
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 
 #ifdef __KERNEL__
 #include <asm/neon.h>

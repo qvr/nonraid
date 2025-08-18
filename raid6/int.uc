@@ -18,7 +18,7 @@
  * This file is postprocessed using unroll.awk
  */
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 
 /*
  * This is the C data type to use

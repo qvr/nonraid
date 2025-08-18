@@ -4,9 +4,9 @@
 
 NonRAID is a fork of the unRAID system's open-source `md_unraid` kernel driver for supported kernels, but targeting primarily Ubuntu 24.04 LTS, and Debian 12/13, enabling UnRAID-style storage arrays with parity protection outside of the commercial UnRAID system.
 
-Unlike in UnRAID, where the driver replaces the kernel's standard `md` driver, the NonRAID driver has been separated into it's own kernel module (`md_nonraid`). This allows it to be easily added as a DKMS module on Ubuntu and Debian based systems, without needing to patch the kernel or replace the standard `md` driver. We do however replace the standard `raid6_pq` module with our patched version, as the upstream driver depends on those patches for the parity calculations.
+Unlike in UnRAID, where the driver replaces the kernel's standard `md` driver, the NonRAID driver has been separated into it's own kernel module (`md_nonraid`). This allows it to be easily added as a DKMS module on Ubuntu and Debian based systems, without needing to patch the kernel or replace the standard `md` driver. Upstream UnRAID additionally patches system's standard `raid6_pq` module for RAID-6 parity calculations, NonRAID instead ships a separate `nonraid6_pq` module with the parity patches, which operates alongside the untouched `raid6_pq` module without potential conflicts.
 
-While this is a fork, we try to keep the changes to driver minimal to make syncs with upstream easier. The driver currently has patches to rebrand and separate the module from `md`, and a couple of patches to prevent kernel crashes if starting the array without importing all disks first or importing in the "wrong" order.
+While this is a fork, we try to keep the changes to driver minimal to make syncs with upstream easier. The driver currently has patches to rebrand and separate the module from `md` and from `raid6_pq`, and a couple of patches to prevent kernel crashes if starting the array without importing all disks first or importing in the "wrong" order.
 
 > [!WARNING]
 > :radioactive: This is an experimental project, the driver has not really been tested outside of virtualized dev environment and data loss is a possibility.
@@ -98,15 +98,11 @@ For other distributions, or if you want to build the DKMS module manually, you c
 ```bash
 # Verify the DKMS module installation
 sudo dkms status
-
-# Update the initramfs to include the patched raid6_pq module
-sudo update-initramfs -u -k all
+# You should see the DKMS module installed for your kernel version:
+# nonraid-dkms/1.3.0, 6.14.0-27-generic, x86_64: installed
 ```
 
-> [!NOTE]
-> Updating the initramfs is needed to make sure the new `raid6_pq` module is used, as otherwise the unpatched module gets loaded by other modules depending on it during initramfs, at least on Ubuntu 24.04. Future kernel upgrades should automatically rebuild the DKMS module, and update the initramfs.
-
-Reboot your system. After rebooting, you can start using NonRAID by creating a new array with the command:
+That's it! The NonRAID kernel modules are installed and DKMS should take care of rebuilding them automatically when the kernel gets updated in the future. No reboot should be necessary, you can start using NonRAID by creating a new array with the command:
 
 ```bash
 sudo nmdctl create
@@ -261,7 +257,7 @@ That document covers: superblock handling, procfs command/status interfaces (`/p
 ## License
 This project is licensed under the GNU General Public License v2.0 (GPL-2.0) - the same license as the Linux kernel, and the `md_unraid` driver itself. See [LICENSE](LICENSE) for the full license text.
 
-Individual Linux kernel source files (under `raid6_pq/`, `md_nonraid`, or the upstream changes tracking branch `upstream`) may have a different license, or be provided under a dual license, but the overall Linux Kernel is GPL-2.0 licensed, with their syscall exception. (See Linux Kernel `Documentation/process/license-rules.rst` for details on kernel licensing rules.)
+Individual Linux kernel source files (under `raid6/`, `md_nonraid/`, or the upstream changes tracking branch `upstream`) may have a different license, or be provided under a dual license, but the overall Linux Kernel is GPL-2.0 licensed, with their syscall exception. (See Linux Kernel `Documentation/process/license-rules.rst` for details on kernel licensing rules.)
 
 ## Disclaimer
 Unraid is a trademark of Lime Technology, Inc. This project is not affiliated with Lime Technology, Inc. in any way.

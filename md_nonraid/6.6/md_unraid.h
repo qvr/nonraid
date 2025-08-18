@@ -54,7 +54,7 @@
  * Here are the raid6 p/q functions. Note: we patched lib/raid6/algos.c to ensure xor_syndrome() function
  * is always available.
  */
-#include <linux/raid/pq.h>
+#include "../../raid6/nonraid_pq.h"
 extern void (*raid6_gen_syndrome)(int, size_t, void **);
 extern void (*raid6_xor_syndrome)(int, int, int, size_t, void **);
 

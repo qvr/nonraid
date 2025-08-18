@@ -8,10 +8,10 @@
 /*
  * raid6/algos.c
  *
- * Algorithm list and algorithm selection for RAID-6
+ * Algorithm list and algorithm selection for RAID-6 (nonraid version)
  */
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 #ifndef __KERNEL__
 #include <sys/mman.h>
 #include <stdio.h>
@@ -19,18 +19,18 @@
 #include <linux/module.h>
 #include <linux/gfp.h>
 /* In .bss so it's zeroed */
-const char raid6_empty_zero_page[PAGE_SIZE] __attribute__((aligned(256)));
-EXPORT_SYMBOL(raid6_empty_zero_page);
+const char nonraid_empty_zero_page[PAGE_SIZE] __attribute__((aligned(256)));
+EXPORT_SYMBOL(nonraid_empty_zero_page);
 #endif
 
-struct raid6_calls raid6_call;
-EXPORT_SYMBOL_GPL(raid6_call);
+struct raid6_calls nonraid_call;
+EXPORT_SYMBOL_GPL(nonraid_call);
 
-void (*raid6_gen_syndrome)(int, size_t, void **);
-EXPORT_SYMBOL_GPL(raid6_gen_syndrome);
+void (*nonraid_gen_syndrome)(int, size_t, void **);
+EXPORT_SYMBOL_GPL(nonraid_gen_syndrome);
 
-void (*raid6_xor_syndrome)(int, int, int, size_t, void **);
-EXPORT_SYMBOL_GPL(raid6_xor_syndrome);
+void (*nonraid_xor_syndrome)(int, int, int, size_t, void **);
+EXPORT_SYMBOL_GPL(nonraid_xor_syndrome);
 
 const struct raid6_calls * const raid6_algos[] = {
 #if defined(__i386__) && !defined(__arch_um__)
@@ -94,11 +94,11 @@ const struct raid6_calls * const raid6_algos[] = {
 	NULL
 };
 
-void (*raid6_2data_recov)(int, size_t, int, int, void **);
-EXPORT_SYMBOL_GPL(raid6_2data_recov);
+void (*nonraid_2data_recov)(int, size_t, int, int, void **);
+EXPORT_SYMBOL_GPL(nonraid_2data_recov);
 
-void (*raid6_datap_recov)(int, size_t, int, void **);
-EXPORT_SYMBOL_GPL(raid6_datap_recov);
+void (*nonraid_datap_recov)(int, size_t, int, void **);
+EXPORT_SYMBOL_GPL(nonraid_datap_recov);
 
 const struct raid6_recov_calls *const raid6_recov_algos[] = {
 #ifdef CONFIG_X86
@@ -148,8 +148,8 @@ static inline const struct raid6_recov_calls *raid6_choose_recov(void)
 				best = *algo;
 
 	if (best) {
-		raid6_2data_recov = best->data2;
-		raid6_datap_recov = best->datap;
+		nonraid_2data_recov = best->data2;
+		nonraid_datap_recov = best->datap;
 
 		pr_info("raid6: using %s recovery algorithm\n", best->name);
 	} else
@@ -204,7 +204,7 @@ static inline const struct raid6_calls *raid6_choose_gen(
 		goto out;
 	}
 
-	raid6_call = *best;
+	nonraid_call = *best;
 
 	if (!IS_ENABLED(CONFIG_RAID6_PQ_BENCHMARK)) {
 		pr_info("raid6: skipped pq benchmark and selected %s\n",
@@ -325,20 +325,20 @@ int __init raid6_select_algo(void)
 
 	cycle = ((disks - 2) * PAGE_SIZE) / 65536;
 	for (i = 0; i < cycle; i++) {
-		memcpy(p, raid6_gfmul, 65536);
+		memcpy(p, nonraid_gfmul, 65536);
 		p += 65536;
 	}
 
 	if ((disks - 2) * PAGE_SIZE % 65536)
-		memcpy(p, raid6_gfmul, (disks - 2) * PAGE_SIZE % 65536);
+		memcpy(p, nonraid_gfmul, (disks - 2) * PAGE_SIZE % 65536);
 
 	/* select raid gen_syndrome function */
 	gen_best = raid6_choose_gen(&dptrs, disks);
-	raid6_gen_syndrome = gen_best->gen_syndrome;
+	nonraid_gen_syndrome = gen_best->gen_syndrome;
 	if (!gen_best->xor_syndrome) {
 		gen_best = raid6_choose_xor(&dptrs, disks);
 	}
-	raid6_xor_syndrome = gen_best->xor_syndrome;
+	nonraid_xor_syndrome = gen_best->xor_syndrome;
 
 	/* select raid recover functions */
 	rec_best = raid6_choose_recov();
@@ -356,5 +356,5 @@ static void raid6_exit(void)
 subsys_initcall(raid6_select_algo);
 module_exit(raid6_exit);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("RAID6 Q-syndrome calculations");
+MODULE_DESCRIPTION("RAID6 Q-syndrome calculations for NonRAID");
 MODULE_VERSION("6.8.0-nonraid");

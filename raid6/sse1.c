@@ -18,7 +18,7 @@
 
 #ifdef CONFIG_X86_32
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 #include "x86.h"
 
 /* Defined in raid6/mmx.c */

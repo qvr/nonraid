@@ -9,7 +9,7 @@
  * Copyright 2002-2004 H. Peter Anvin
  */
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 #include "loongarch.h"
 
 /*

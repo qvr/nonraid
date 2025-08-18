@@ -12,7 +12,7 @@
  *
  */
 
-#include <linux/raid/pq.h>
+#include "nonraid_raid6.h"
 #include "x86.h"
 
 static const struct raid6_sse_constants {

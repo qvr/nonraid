@@ -32,8 +32,7 @@ jobs:
           - { name: "Ubuntu 24.04 HWE", image: "ubuntu:24.04", headers: "linux-headers-generic-hwe-24.04" }
       fail-fast: false
 
-    container:
-      image: ${{ matrix.container.image }}
+    container: ${{ matrix.container.image }}
 
     steps:
       - name: Install base dependencies

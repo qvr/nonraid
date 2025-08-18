@@ -1,0 +1,296 @@
+name: NonRAID Integration Tests
+
+on:
+  pull_request:
+    paths:
+      - 'md_nonraid/**'
+      - 'raid6/**'
+      - 'dkms.conf'
+      - 'Makefile'
+      - 'tools/**'
+      - '.github/workflows/dkms-integration-tests.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'md_nonraid/**'
+      - 'raid6/**'
+      - 'dkms.conf'
+      - 'Makefile'
+      - 'tools/**'
+  schedule:
+    - cron: '0 3 * * 0'  # Run 1 hour after build tests
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    name: NonRAID Integration Tests
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git build-essential dkms gdisk xfsprogs
+
+      - name: Extract DKMS version
+        run: |
+          DKMS_VERSION=$(grep "^PACKAGE_VERSION=" dkms.conf | cut -d= -f2)
+          echo "DKMS_VERSION=$DKMS_VERSION" >> $GITHUB_ENV
+          echo "Detected DKMS version: $DKMS_VERSION"
+
+      - name: Install kernel headers
+        run: |
+          # Install headers for the running kernel
+          sudo apt-get install -y linux-headers-$(uname -r)
+
+          # Verify headers are installed
+          KVERSION=$(uname -r)
+          echo "Using kernel version: $KVERSION"
+          ls -la /lib/modules/$KVERSION/build/ || echo "Build symlink not found"
+          ls -la /usr/src/linux-headers-* || echo "No headers found in /usr/src"
+
+      - name: Prepare DKMS source
+        run: |
+          # Copy source to DKMS source directory
+          DKMS_SRC_DIR="/usr/src/nonraid-dkms-$DKMS_VERSION"
+          sudo mkdir -p "$DKMS_SRC_DIR"
+          sudo cp -r md_nonraid/ raid6/ dkms.conf Makefile "$DKMS_SRC_DIR/"
+
+          echo "DKMS source directory contents:"
+          ls -la "$DKMS_SRC_DIR"
+
+      - name: Build and install modules
+        run: |
+          # Add and build module
+          sudo dkms add nonraid-dkms/$DKMS_VERSION
+          sudo dkms build nonraid-dkms/$DKMS_VERSION
+          sudo dkms install nonraid-dkms/$DKMS_VERSION
+
+          echo "DKMS status after install:"
+          sudo dkms status
+
+      - name: Load modules
+        run: |
+          # Load the modules
+          sudo modprobe nonraid6_pq
+          sudo modprobe md-nonraid super=/nonraid.dat
+
+          # Verify modules are loaded
+          echo "Loaded modules:"
+          lsmod | grep -E "(nonraid|md_nonraid)" || echo "No NonRAID modules found in lsmod"
+
+          # Check module info
+          echo "Module Information:"
+          if modinfo nonraid6_pq > /dev/null 2>&1; then
+            echo "nonraid6_pq module:"
+            modinfo nonraid6_pq
+          fi
+
+          if modinfo md_nonraid > /dev/null 2>&1; then
+            echo "md-nonraid module:"
+            modinfo md_nonraid
+          fi
+
+      - name: Create test environment
+        run: |
+          echo "Creating test disk images..."
+
+          # Create test disk images
+          sudo dd if=/dev/zero of=d1 bs=1M count=1024 status=progress
+          sudo dd if=/dev/zero of=d2 bs=1M count=1024 status=progress
+          sudo dd if=/dev/zero of=d3 bs=1M count=1024 status=progress
+
+          # Set up loop devices
+          disk1=$(sudo losetup -fP --show d1)
+          disk2=$(sudo losetup -fP --show d2)
+          disk3=$(sudo losetup -fP --show d3)
+
+          echo "DISK1=$disk1" >> $GITHUB_ENV
+          echo "DISK2=$disk2" >> $GITHUB_ENV
+          echo "DISK3=$disk3" >> $GITHUB_ENV
+
+          echo "Created loop devices: $disk1, $disk2, $disk3"
+
+          # Create partitions
+          sudo sgdisk -o -a 8 -n 1:32K:0 $disk1
+          sudo sgdisk -o -a 8 -n 1:32K:0 $disk2
+          sudo sgdisk -o -a 8 -n 1:32K:0 $disk3
+
+          # Create symlinks for device discovery
+          sudo ln -s $disk1 -t /dev/disk/by-id/
+          sudo ln -s $disk2 -t /dev/disk/by-id/
+          sudo ln -s $disk3 -t /dev/disk/by-id/
+
+          echo "Test environment ready"
+
+      - name: Test NonRAID array operations
+        run: |
+          echo "## NonRAID Array Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "Get disk size with nmdctl get_disk_size_kb"
+          size=$(sudo bash -c "source tools/nmdctl; get_disk_size_kb ${DISK1}p1")
+
+          # Import disks to the array
+          echo "Importing disks to NonRAID array..."
+          echo "import 0 $(basename $DISK1)p1 0 $size 0 $(basename $DISK1)" | sudo tee /proc/nmdcmd
+          echo "import 1 $(basename $DISK2)p1 0 $size 0 $(basename $DISK2)" | sudo tee /proc/nmdcmd
+          echo "import 2 $(basename $DISK3)p1 0 $size 0 $(basename $DISK3)" | sudo tee /proc/nmdcmd
+
+          sleep 2 # Give imports time to process
+
+          # Check initial status
+          echo "Initial Status:"
+          grep -E 'mdState|mdResyncAction' /proc/nmdstat
+
+          # Start the array
+          echo "Starting NonRAID array..."
+          echo "start NEW_ARRAY" | sudo tee /proc/nmdcmd
+          sleep 2 # Give array start time
+
+          # Check status after start
+          echo "Status After Start:"
+          grep -E 'mdState|mdResync' /proc/nmdstat
+
+          # Start parity sync
+          echo "Starting parity sync..."
+          echo "check CORRECT" | sudo tee /proc/nmdcmd
+          sleep 2
+
+          # Wait for parity sync with timeout
+          start=$EPOCHSECONDS
+          while ! grep -q "mdResync=0" /proc/nmdstat; do
+            echo "Waiting for Parity Sync to complete..."
+            sleep 2
+            if (( EPOCHSECONDS-start > 30 )); then
+              echo "Timeout waiting for Parity Sync"
+              grep -E 'mdState|mdResync' /proc/nmdstat
+              exit 1
+            fi
+          done
+
+          # Check status after parity sync
+          echo "Status After Parity Sync:"
+          grep -E 'mdState|mdResync' /proc/nmdstat
+
+          # Reload & start to clear driver inconsistency
+          sudo bash tools/nmdctl reload
+          sudo bash tools/nmdctl start
+
+          # Create filesystems
+          sudo mkfs.xfs /dev/nmd1p1
+          sudo mkfs.xfs /dev/nmd2p1
+
+          sudo bash tools/nmdctl mount
+
+          # Create test data
+          sudo dd if=/dev/urandom of=/mnt/disk1/testfile bs=10M count=10 status=progress
+          orig_md5=$(md5sum /mnt/disk1/testfile)
+
+          # Display status with nmdctl
+          echo "## nmdctl Initial Status Output" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          sudo bash tools/nmdctl --no-color status >> $GITHUB_STEP_SUMMARY || echo "" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "$orig_md5" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          sudo bash tools/nmdctl -u umount
+          sudo bash tools/nmdctl -u stop
+
+          sudo bash tools/nmdctl unassign 1 <<< "y" || true
+          sudo bash tools/nmdctl status || true
+
+          echo "Wiping disk 2..."
+          sudo dd bs=1M if=/dev/zero of=${DISK2}p1 || true
+
+          echo "start DISABLE_DISK" | sudo tee /proc/nmdcmd
+          sleep 2
+
+          sudo bash tools/nmdctl -u mount
+          disabled_md5=$(md5sum /mnt/disk1/testfile)
+
+          echo "## nmdctl Status Output with missing disk" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          sudo bash tools/nmdctl --no-color status >> $GITHUB_STEP_SUMMARY || echo "" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "$disabled_md5" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          sudo bash tools/nmdctl -u umount
+          sudo bash tools/nmdctl -u stop
+          sudo bash tools/nmdctl reload
+          sudo bash tools/nmdctl import
+
+          echo "import 1 $(basename $DISK2)p1 0 $size 0 $(basename $DISK2)" | sudo tee /proc/nmdcmd
+          sleep 2
+
+          sudo bash tools/nmdctl status || true
+
+          echo "start RECON_DISK" | sudo tee /proc/nmdcmd
+          sleep 2
+
+          # Start disk reconstruction
+          echo "Starting disk reconstruction..."
+          echo "check CORRECT" | sudo tee /proc/nmdcmd
+          sleep 2
+
+          # Wait for reconstruction with timeout
+          start_recon=$EPOCHSECONDS
+          while ! grep -q "mdResync=0" /proc/nmdstat; do
+            echo "Waiting for Disk Reconstruction to complete..."
+            sleep 2
+            if (( EPOCHSECONDS-start_recon > 30 )); then
+              echo "Timeout waiting for Disk Reconstruction"
+              grep -E 'mdState|mdResync' /proc/nmdstat
+              exit 1
+            fi
+          done
+
+          sudo bash tools/nmdctl -u mount
+          recon_md5=$(md5sum /mnt/disk1/testfile)
+
+          echo "## nmdctl Status Output after data disk rebuild" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          sudo bash tools/nmdctl --no-color status >> $GITHUB_STEP_SUMMARY || echo "" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "$recon_md5" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Verify data integrity
+          if [ "$orig_md5" == "$recon_md5" ]; then
+            echo "## ✅ Data integrity verified" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Data integrity check failed" >> $GITHUB_STEP_SUMMARY
+            echo "Original: $orig_md5" >> $GITHUB_STEP_SUMMARY
+            echo "After reconstruction: $recon_md5" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          echo "Array operations completed successfully"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # Stop NonRAID array
+          sudo bash tools/nmdctl -u umount || true
+          sudo bash tools/nmdctl -u stop || true
+
+          # Unload modules
+          sudo modprobe -r md_nonraid || true
+          sudo modprobe -r nonraid6_pq || true
+
+          # Clean up loop devices
+          sudo losetup -d $DISK1 || true
+          sudo losetup -d $DISK2 || true
+          sudo losetup -d $DISK3 || true
+
+          # Remove test files
+          sudo rm -f d1 d2 d3
+
+          echo "Cleanup completed"

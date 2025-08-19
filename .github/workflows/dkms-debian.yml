@@ -150,19 +150,17 @@ jobs:
             ```bash
             sudo apt install dkms linux-headers-$(uname -r) build-essential
             sudo apt install ./nonraid-dkms_*.deb
-            sudo update-initramfs -u -k all
-            # Reboot required
             ```
 
             ## Usage
-            After installation and reboot, load the driver:
+            After installation, verify the DKMS module has been built and installed:
             ```bash
-            sudo modprobe nonraid super=/path/to/nonraid.dat
+            sudo dkms status
             ```
+            Download and install the latest [nonraid-tools package](https://github.com/qvr/nonraid/releases?q=nonraid+tools) from separate release for the array management `nmdctl` tool.
 
             ## Important Notes
             - ⚠️ **Experimental software** - Use at your own risk
-            - You should also download & install the latest [nonraid-tools package](https://github.com/qvr/nonraid/releases?q=nonraid+tools) from separate release for array management `nmdctl` tool.
             - See [README.md](https://github.com/${{ github.repository }}/blob/main/README.md) for detailed usage instructions
             - Always backup important data before use
           files: |

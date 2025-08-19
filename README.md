@@ -4,6 +4,18 @@
 
 NonRAID is a fork of the unRAID system's open-source `md_unraid` kernel driver for supported kernels, but targeting primarily Ubuntu 24.04 LTS, and Debian 12/13, enabling UnRAID-style storage arrays with parity protection outside of the commercial UnRAID system.
 
+### How it works
+
+NonRAID driver takes multiple block devices (drives) and turns them into a storage array where 1-2 devices serve as parity disks. These store calculated parity data that, together with the remaining data drives, can reconstruct any single (or dual, with two parity drives) drive failure. The rest are data disks, and each will have an independent filesystem for user data.
+
+When the array starts, it creates new virtual block devices (`/dev/nmdXp1`) for each data disk with real-time parity protection. Each data disk can have different filesystems - you can format one with XFS, another with BTRFS, have LUKS encryption with ZFS on one, etc.
+
+You can add drives of different sizes, with the parity drive(s) needing to be at least as large as the biggest data drive. In catastrophic disk failures where more drives fail than parity would allow, only the data on the failed drives can be lost - all data disk filesystems can still be accessed individually even without the array running.
+
+This provides redundancy against drive failures while allowing mixed drive sizes and filesystems. You can then present all the separate filesystems as a single mount point using tools like [mergerfs](https://github.com/trapexit/mergerfs), giving you a unified storage pool with parity protection.
+
+### Driver implementation differences
+
 Unlike in UnRAID, where the driver replaces the kernel's standard `md` driver, the NonRAID driver has been separated into it's own kernel module (`md_nonraid`). This allows it to be easily added as a DKMS module on Ubuntu and Debian based systems, without needing to patch the kernel or replace the standard `md` driver. Upstream UnRAID additionally patches system's standard `raid6_pq` module for RAID-6 parity calculations, NonRAID instead ships a separate `nonraid6_pq` module with the parity patches, which operates alongside the untouched `raid6_pq` module without potential conflicts.
 
 While this is a fork, we try to keep the changes to driver minimal to make syncs with upstream easier. The driver currently has patches to rebrand and separate the module from `md` and from `raid6_pq`, and a couple of patches to prevent kernel crashes if starting the array without importing all disks first or importing in the "wrong" order.

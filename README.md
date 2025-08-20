@@ -182,6 +182,9 @@ Disk must already be partitioned as with `create`, and the disk must not already
 ```bash
 sudo nmdctl add
 ```
+The disk does not need to be pre-cleared before running this command. Once the array is started after adding the new disk, the disk will not be taken into use until a clear operation is triggered with `nmdctl check`. The clearing operation does not affect parity - only the added new disk gets cleared and then taken into use.
+
+`nmdctl add` does not currently support skipping the clearing operation, as there is no reliable way to ensure the added disk is actually properly pre-cleared.
 
 ### Replace a disk (interactive)
 

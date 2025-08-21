@@ -47,36 +47,51 @@ PROC_NMDSTAT="${PROC_NMDSTAT:-/proc/nmdstat}"
 # Display usage information
 usage() {
     local exit_code="${1:-1}"
-    echo "nmdctl - NonRAID array management utility (v$VERSION)"
-    echo ""
-    echo "Usage: nmdctl [GLOBAL OPTIONS] COMMAND [COMMAND OPTIONS]"
-    echo ""
-    echo "Commands:"
-    echo "  status [-v] [--no-fs] [-o OUTPUT]"
-    echo "                              Show current array status, --no-fs will not show filesystem information"
-    echo "                              OUTPUT can be: default, prometheus, json"
-    echo "  create                      Create a new array with interactive disk assignment"
-    echo "  start                       Start the array"
-    echo "  stop                        Stop the array"
-    echo "  import                      Import all disks to the array without starting it"
-    echo "  add                         Add a new disk to the array"
-    echo "  replace SLOT                Replace a disk in the specified slot"
-    echo "  unassign SLOT               Unassign a disk from the specified slot"
-    echo "  reload                      Reload nonraid module with specified superblock"
-    echo "  check [OPTION]              Start or stop parity check (CORRECT (default), NOCORRECT, or PAUSE, RESUME, CANCEL)"
-    echo "  set [SETTING] [VALUE]       Set array settings, use 'nmdctl set' for list of available settings"
-    echo "  mount [MOUNTPREFIX]         Mount all active data disks (default prefix: /mnt/disk)"
-    echo "  unmount                     Unmount all active data disks"
-    echo ""
-    echo "Global Options:"
-    echo "  -s, --super PATH            Superblock file path to use when loading the module (default: $DEFAULT_SUPERBLOCK)"
-    echo "  -k, --keyfile PATH          Path to LUKS keyfile to use during mounting (default: $LUKS_KEYFILE)"
-    echo "  -u, --unattended            Enable unattended mode, will import and start a healthy array without prompts"
-    echo "  --no-color                  Disable colored output"
-    echo "  -v, --verbose               Enable verbose output"
-    echo "  -V, --version               Display version information"
-    echo "  -h, --help                  Display this help message"
-    echo ""
+    cat <<EOF
+nmdctl - NonRAID array management utility (v${VERSION})
+
+Usage:
+    nmdctl [GLOBAL OPTIONS] COMMAND [COMMAND OPTIONS]
+
+Status and monitoring command:
+    status [OPTIONS]                Show current array status
+        -v, --verbose               Show detailed status information
+        --no-fs                     Don't show filesystem information
+        -o, --output FORMAT         Output format: default, prometheus, json
+
+Array Management Commands:
+    create                          Create a new array with interactive disk assignment
+    start                           Start the array
+    stop                            Stop the array
+    import                          Import all disks to the array without starting it
+
+Disk Management Commands:
+    add                             Add a new disk to the array
+    replace SLOT                    Replace a disk in the specified slot
+    unassign SLOT                   Unassign a disk from the specified slot
+
+Maintenance Commands:
+    reload                          Reload nonraid module with specified superblock
+    check [OPTION]                  Start or stop parity check
+                                    Options: CORRECT (default), NOCORRECT, PAUSE, RESUME, CANCEL
+    set [SETTING] [VALUE]           Set array settings
+                                    Use 'nmdctl set' for list of available settings
+
+Filesystem Commands:
+    mount [MOUNTPREFIX]             Mount all active data disks
+                                    Default prefix: /mnt/disk
+    unmount                         Unmount all active data disks
+
+Global Options:
+    -s, --super PATH                Superblock file path (default: ${DEFAULT_SUPERBLOCK})
+    -k, --keyfile PATH              LUKS keyfile path (default: ${LUKS_KEYFILE})
+    -u, --unattended                Enable unattended mode
+    --no-color                      Disable colored output
+    -v, --verbose                   Enable verbose output
+    -V, --version                   Display version information
+    -h, --help                      Display this help message
+
+EOF
     exit "$exit_code"
 }
 

@@ -62,8 +62,8 @@ rdevStatus.2=DISK_OK
 rdevNumErrors.0=0
 rdevNumErrors.1=0
 rdevNumErrors.2=0
-sbSynced=1609459200
-sbSynced2=1609459200
+sbSynced=$(( $(date +%s) - 14*24*3600 ))
+sbSynced2=$(( $(date +%s) - 14*24*3600 ))
 sbSyncErrs=$sync_errs
 sbSyncExit=0
 EOF
@@ -166,6 +166,7 @@ EOF
     echo "$output"
     [ "$status" -eq 0 ]
     [[ "$output" =~ Array\ State.*STARTED ]]
+    [[ "$output" =~ "Disks Present : 3" ]]
     [[ "$output" =~ Array\ Health.*HEALTHY ]]
 }
 
@@ -317,4 +318,158 @@ EOF
     # Should complete in under 0.5 seconds
     [ "$(echo "$duration < 0.5" | bc -l)" -eq 1 ]
     [ "$status" -eq 0 ]
+}
+
+# Tests for different output formats
+@test "status parsing - default format" {
+    create_mock_nmdstat "STARTED" 0 0 > "$BATS_TMPDIR/mock_nmdstat_default"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_default"
+    run show_status
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "=== NonRAID Array Status ===" ]]
+    [[ "$output" =~ Array\ State.*STARTED ]]
+    [[ "$output" =~ Array\ Health.*HEALTHY ]]
+}
+
+@test "status parsing - default format explicit" {
+    create_mock_nmdstat "STARTED" 0 0 > "$BATS_TMPDIR/mock_nmdstat_default_explicit"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_default_explicit"
+    run show_status -o default
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "=== NonRAID Array Status ===" ]]
+    [[ "$output" =~ Array\ State.*STARTED ]]
+    [[ "$output" =~ Array\ Health.*HEALTHY ]]
+}
+
+@test "status parsing - prometheus format" {
+    create_mock_nmdstat "STARTED" 0 0 > "$BATS_TMPDIR/mock_nmdstat_prometheus"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_prometheus"
+    run show_status -o prometheus
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "# HELP nonraid_array_state" ]]
+    [[ "$output" =~ "# HELP nonraid_array_health" ]]
+    [[ "$output" =~ "nonraid_array_state{label=\"MockArray\"} 1" ]]
+    [[ "$output" =~ "nonraid_array_health{label=\"MockArray\",status=\"HEALTHY\"} 0" ]]
+}
+
+@test "status parsing - json format" {
+    create_mock_nmdstat "STARTED" 0 0 > "$BATS_TMPDIR/mock_nmdstat_json"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_json"
+    run show_status -o json
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "\"timestamp\":" ]]
+    [[ "$output" =~ "\"state\": \"STARTED\"" ]]
+    [[ "$output" =~ "\"status\": \"HEALTHY\"" ]]
+    [[ "$output" =~ "\"label\": \"MockArray\"" ]]
+
+    # Validate that the output is valid JSON
+    echo "$output" | jq . > /dev/null
+    [ "$?" -eq 0 ]
+}
+
+@test "status parsing - invalid format" {
+    create_mock_nmdstat "STARTED" 0 0 > "$BATS_TMPDIR/mock_nmdstat_invalid_format"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_invalid_format"
+    run show_status -o invalid
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Error: Invalid output format" ]]
+}
+
+@test "prometheus format - degraded state" {
+    create_mock_nmdstat "STARTED" 1 0 > "$BATS_TMPDIR/mock_nmdstat_prometheus_degraded"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_prometheus_degraded"
+    run show_status -o prometheus
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "nonraid_array_health{label=\"MockArray\",status=\"DEGRADED\"} 1" ]]
+    [[ "$output" =~ "nonraid_nummissing_count{label=\"MockArray\"} 1" ]]
+}
+
+@test "json format - degraded state" {
+    create_mock_nmdstat "STARTED" 1 0 > "$BATS_TMPDIR/mock_nmdstat_json_degraded"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_json_degraded"
+    run show_status -o json
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "\"status\": \"DEGRADED\"" ]]
+    [[ "$output" =~ "\"code\": 1" ]]
+}
+
+@test "data collection functions work correctly" {
+    create_mock_nmdstat "STARTED" 0 0 > "$BATS_TMPDIR/mock_nmdstat_collection"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_collection"
+
+    # Test data collection functions
+    get_all_nmdstat_values NMDSTAT_VALUES
+    collect_array_summary
+    collect_array_health
+    collect_array_size_and_parity
+    collect_resync_status
+    collect_disk_status
+
+    echo "$status"
+    echo "$output"
+
+    # Verify ARRAY_STATUS_DATA was populated correctly
+    [ "${ARRAY_STATUS_DATA[mdstate]}" = "STARTED" ]
+    [ "${ARRAY_STATUS_DATA[sblabel]}" = "MockArray" ]
+    [ "${ARRAY_STATUS_DATA[health_status]}" = "HEALTHY" ]
+    [ "${ARRAY_STATUS_DATA[health_code]}" = "0" ]
+    [ "${ARRAY_STATUS_DATA[data_disk_count]}" = "2" ]
+    [ "${ARRAY_STATUS_DATA[has_parity]}" = "true" ]
+    [ "${ARRAY_STATUS_DATA[data_size_gb]}" = "2" ]
+    [ "${ARRAY_STATUS_DATA[parity_size_gb]}" = "2" ]
+    [ -n "${ARRAY_STATUS_DATA[last_sync_timestamp]}" ]
+    [ -n "${ARRAY_STATUS_DATA[last_sync_ago]}" ]
+
+    # Verify RESYNC_STATUS_DATA was populated correctly
+    [ "${RESYNC_STATUS_DATA[active]}" = "false" ]
+    [ "${RESYNC_STATUS_DATA[progress_percent]}" = "0" ]
+    [ "${RESYNC_STATUS_DATA[paused]}" = "false" ]
+    [ "${RESYNC_STATUS_DATA[pending]}" = "false" ]
+
+    # Verify DISK_STATUS_DATA was populated correctly
+    # Check that we have data for parity disk (slot 0)
+    [ "${DISK_STATUS_DATA[slot_0_type]}" = "P" ]
+    [ "${DISK_STATUS_DATA[slot_0_present]}" = "true" ]
+    [ "${DISK_STATUS_DATA[slot_0_size_gb]}" = "2" ]
+    [ "${DISK_STATUS_DATA[slot_0_errors]}" = "0" ]
+
+    # Check that we have data for data disks (slots 1 and 2)
+    [ "${DISK_STATUS_DATA[slot_1_present]}" = "true" ]
+    [ "${DISK_STATUS_DATA[slot_1_type]}" = "data" ]
+    [ "${DISK_STATUS_DATA[slot_1_size_gb]}" = "1" ]
+    [ "${DISK_STATUS_DATA[slot_1_errors]}" = "0" ]
+
+    [ "${DISK_STATUS_DATA[slot_2_present]}" = "true" ]
+    [ "${DISK_STATUS_DATA[slot_2_type]}" = "data" ]
+    [ "${DISK_STATUS_DATA[slot_2_size_gb]}" = "1" ]
+    [ "${DISK_STATUS_DATA[slot_2_errors]}" = "0" ]
 }

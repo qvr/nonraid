@@ -1512,16 +1512,31 @@ get_mountpoint() {
         "zfs")
             # Get ZFS pool name that contains this device
             if command -v zpool >/dev/null 2>&1; then
-                local rel_device=$(basename "$device")
-                local pool=$(zpool list -H -o name,health | awk '{print $1}' | while read -r pool; do
-                    if zpool status "$pool" 2>/dev/null | grep -q "$rel_device"; then
-                        echo "$pool"
-                        break
-                    fi
-                done)
+                local abs_device="$device"
+                [[ "$device" != /dev/* ]] && abs_device="/dev/$device"
+
+                # Use zpool list -v to get pool-to-vdev mapping
+                # Recent zpool has json output, but i dont want to add jq dependency
+                local pool=$(zpool list -v -H -P 2>/dev/null | awk -v abs_target="$abs_device" '
+                    # Pool lines
+                    /^[^\t ]/ {
+                        current_pool = $1
+                        next
+                    }
+                    # Vdev lines
+                    /^[\t ]/ {
+                        device_path = $1
+
+                        # Check if this vdev matches our target device
+                        if (device_path == abs_target) {
+                            print current_pool
+                            exit
+                        }
+                    }
+                ')
 
                 if [ -n "$pool" ]; then
-                    local found_mountpoint=$(zfs list -H -o mountpoint "$pool" 2>/dev/null)
+                    local found_mountpoint=$(zfs get -H -o value mountpoint "$pool" 2>/dev/null)
                     if [ -n "$found_mountpoint" ] && [ "$found_mountpoint" != "none" ]; then
                         mountpoint="$found_mountpoint"
                     fi

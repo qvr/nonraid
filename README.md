@@ -16,7 +16,7 @@ This provides redundancy against drive failures while allowing mixed drive sizes
 
 ### Driver implementation differences
 
-Unlike in UnRAID, where the driver replaces the kernel's standard `md` driver, the NonRAID driver has been separated into it's own kernel module (`md_nonraid`). This allows it to be easily added as a DKMS module on Ubuntu and Debian based systems, without needing to patch the kernel or replace the standard `md` driver. Upstream UnRAID additionally patches system's standard `raid6_pq` module for RAID-6 parity calculations, NonRAID instead ships a separate `nonraid6_pq` module with the parity patches, which operates alongside the untouched `raid6_pq` module without potential conflicts.
+Unlike in UnRAID, where the driver replaces the kernel's standard `md` driver, the NonRAID driver has been separated into it's own kernel module (`md_nonraid`). This allows it to be easily added as a DKMS module on supported kernel versions, without needing to patch the kernel or replace the standard `md` driver. Upstream UnRAID additionally patches system's standard `raid6_pq` module for RAID-6 parity calculations, NonRAID instead ships a separate `nonraid6_pq` module with the parity patches, which operates alongside the untouched `raid6_pq` module without potential conflicts.
 
 While this is a fork, we try to keep the changes to driver minimal to make syncs with upstream easier. The driver currently has patches to rebrand and separate the module from `md` and from `raid6_pq`, and a couple of patches to prevent kernel crashes if starting the array without importing all disks first or importing in the "wrong" order.
 
@@ -114,6 +114,13 @@ sudo dkms status
 # nonraid-dkms/1.3.0, 6.14.0-27-generic, x86_64: installed
 ```
 
+> [!IMPORTANT]
+> **Installing kernel headers meta-package**: To ensure DKMS can rebuild the NonRAID modules when your kernel gets updated, you should also install your distribution's kernel headers meta-package. This ensures that new kernel headers are automatically pulled in during kernel updates:
+> - **Ubuntu**: `sudo apt install linux-headers-generic` (or `linux-headers-generic-hwe-24.04` for HWE kernels)
+> - **Debian**: `sudo apt install linux-headers-amd64` (or the appropriate package for your kernel flavor)
+>
+> Without the kernel headers meta-package, new kernel updates might not install the corresponding headers, which would prevent DKMS from building the NonRAID modules for the new kernel.
+
 That's it! The NonRAID kernel modules are installed and DKMS should take care of rebuilding them automatically when the kernel gets updated in the future. No reboot should be necessary, you can start using NonRAID by creating a new array with the command:
 
 ```bash
@@ -166,7 +173,7 @@ Starting an array commits all configuration changes like array creation, disk un
 ```bash
 sudo nmdctl start/stop
 ```
-> [!NOTE]
+> [!CAUTION]
 > If you are trying to start/import an existing UnRAID array, and you get an warning about size mismatch between detected and configured partition size, do not continue the import, but open an issue with details.
 
 ### Import all disks to the array without starting
@@ -267,7 +274,11 @@ That document covers: superblock handling, procfs command/status interfaces (`/p
 - For a complete, polished storage solution with support, you might want to still consider getting UnRAID
 
 ## Plans
-- **IF** we decide to diverge further from the upstream, the module should be fairly simple to modify to build on multiple kernel versions, so that we dont have to ship multiple versions of the module code for different kernel versions (and we would be able to support 6.9 and 6.10 kernels too) - currently not planned though
+- Plan is to keep the driver in sync with upstream changes, and focus on ironing out any sharp edges in `nmdctl`
+  - New features to `nmdctl` based on feedback
+  - *Not planned* is adding major new features into the array driver (like offline parity, additional parity disks etc)
+  - Feature contributions to the driver will be considered though
+- **IF** we decide to diverge further from the upstream, the module should be fairly simple to modify to build on multiple kernel versions (with autoconf or similar), so that we dont have to ship multiple versions of the module code for different kernel versions (and we would be able to support 6.9 and 6.10 kernels too) - currently not planned though
 
 ## License
 This project is licensed under the GNU General Public License v2.0 (GPL-2.0) - the same license as the Linux kernel, and the `md_unraid` driver itself. See [LICENSE](LICENSE) for the full license text.

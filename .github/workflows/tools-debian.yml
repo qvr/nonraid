@@ -94,6 +94,7 @@ jobs:
           PPA_GPG_PASSPHRASE: ${{ secrets.PPA_GPG_PASSPHRASE }}
         run: |
           cd tools
+          rm -rf tests
           echo "::group::Build Debian Source Package"
           git archive --format=tar.gz --prefix="nonraid-tools-${{ steps.get-nmdctl.outputs.version }}/" HEAD > "../nonraid-tools_${{ steps.get-nmdctl.outputs.version }}.orig.tar.gz" nmdctl systemd
           gpg --batch --passphrase-file <(cat <<<"${PPA_GPG_PASSPHRASE}") --import <(cat <<<"${PPA_GPG_KEY}")

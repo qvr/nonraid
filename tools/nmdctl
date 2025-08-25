@@ -714,11 +714,18 @@ collect_resync_status() {
             eta_seconds=$(( remaining_blocks / rate ))
         fi
 
+        # Calculate actual elapsed time from start of resync operation
+        local elapsed_seconds=0
+        local sbsynced="${NMDSTAT_VALUES[sbSynced]}"
+        if [ "$sbsynced" != "0" ] && [ -n "$sbsynced" ]; then
+            elapsed_seconds=$(($(printf "%(%s)T")-sbsynced))
+        fi
+
         RESYNC_STATUS_DATA["progress_percent"]="$progress"
         RESYNC_STATUS_DATA["position_gb"]=$(convert_blocks_to_gb "$mdresyncpos" 2)
         RESYNC_STATUS_DATA["size_gb"]=$(convert_blocks_to_gb "$mdresyncsize" 0)
         RESYNC_STATUS_DATA["rate_mb_s"]="$rate_mb"
-        RESYNC_STATUS_DATA["elapsed_seconds"]="$mdresyncdt"
+        RESYNC_STATUS_DATA["elapsed_seconds"]="$elapsed_seconds"
         RESYNC_STATUS_DATA["eta_seconds"]="$eta_seconds"
     fi
 }

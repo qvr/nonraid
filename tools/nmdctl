@@ -983,8 +983,8 @@ format_human_disk_status() {
         if [ "$MONITOR_MODE" -eq 1 ]; then
             # Monitor mode with I/O columns
             if [ "$VERBOSE" -eq 1 ]; then
-                echo -e "Slot  Status               Device      Size(1k)  Disk Name   FS            Mountpoint        Usage     Read(MB/s)  Write(MB/s)  Drive ID"
-                echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------  ----------  -----------  -------------------------------------"
+                echo -e "Slot  Status               Device      Size(1k)     Disk Name   FS            Mountpoint        Usage     Read(MB/s)  Write(MB/s)  Drive ID"
+                echo -e "----  -------------------  ----------  -----------  ----------  ------------  ---------------   --------  ----------  -----------  -------------------------------------"
             else
                 echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage     Read(MB/s)  Write(MB/s)"
                 echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------  ----------  -----------"
@@ -992,8 +992,8 @@ format_human_disk_status() {
         else
             # Regular mode without I/O column
             if [ "$VERBOSE" -eq 1 ]; then
-                echo -e "Slot  Status               Device      Size(1k)  Disk Name   FS            Mountpoint        Usage     Drive ID"
-                echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------  -------------------------------------"
+                echo -e "Slot  Status               Device      Size(1k)     Disk Name   FS            Mountpoint        Usage     Drive ID"
+                echo -e "----  -------------------  ----------  -----------  ----------  ------------  ---------------   --------  -------------------------------------"
             else
                 echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage"
                 echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------"
@@ -1001,8 +1001,8 @@ format_human_disk_status() {
         fi
     else
         if [ "$VERBOSE" -eq 1 ]; then
-            echo -e "Slot  Status               Device      Size(1k)  Drive ID"
-            echo -e "----  -------------------  ----------  --------  -------------------------------------"
+            echo -e "Slot  Status               Device      Size(1k)     Drive ID"
+            echo -e "----  -------------------  ----------  -----------  -------------------------------------"
         else
             echo -e "Slot  Status               Device      Size(GB)"
             echo -e "----  -------------------  ----------  --------"
@@ -1074,7 +1074,7 @@ format_human_disk_entry() {
             local write_rate_formatted=$(format_io_rate "${DISK_STATUS_DATA[slot_${idx}_write_rate_scaled]:-0}")
 
             if [ "$VERBOSE" -eq 1 ]; then
-                printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s  %-10s  %-11s  %s\n" \
+                printf "%-10s  %-11s  %-10s  %-12s  %-16s  %-8s  %-10s  %-11s  %s\n" \
                     "$rdevname" "$disksize" "${diskname:-$slot_display}" \
                     "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}" \
                     "$read_rate_formatted" "$write_rate_formatted" "$diskid"
@@ -1087,7 +1087,7 @@ format_human_disk_entry() {
         else
             # Regular mode without I/O column
             if [ "$VERBOSE" -eq 1 ]; then
-                printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s  %s\n" \
+                printf "%-10s  %-11s  %-10s  %-12s  %-16s  %-8s  %s\n" \
                     "$rdevname" "$disksize" "${diskname:-$slot_display}" \
                     "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}" "$diskid"
             else
@@ -1098,7 +1098,7 @@ format_human_disk_entry() {
         fi
     else
         if [ "$VERBOSE" -eq 1 ]; then
-            printf "%-10s  %-8s  %s\n" "$rdevname" "$disksize" "$diskid"
+            printf "%-10s  %-11s  %s\n" "$rdevname" "$disksize" "$diskid"
         else
             printf "%-10s  %-8s\n" "$rdevname" "$sizegb"
         fi

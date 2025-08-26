@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.11.0
+VERSION=1.12.0
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -19,6 +19,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+
+# Monitor mode status bars
+HEADER_BG='\033[44;37m'  # Blue background, white text
+FOOTER_BG='\033[100;97m' # Dark gray background, bright white text
 
 # Default superblock path
 DEFAULT_SUPERBLOCK="/nonraid.dat"
@@ -32,6 +36,8 @@ VERBOSE=0
 UNATTENDED=0
 # status modes
 NO_FS=0
+MONITOR_MODE=0
+MONITOR_INTERVAL=2
 
 # Global associative array for nmdstat values
 declare -g -A NMDSTAT_VALUES
@@ -58,6 +64,7 @@ Status and monitoring command:
         -v, --verbose               Show detailed status information
         --no-fs                     Don't show filesystem information
         -o, --output FORMAT         Output format: default, prometheus, json
+        -m, --monitor [INTERVAL]    Monitor mode: refresh status every INTERVAL seconds (default: $MONITOR_INTERVAL)
 
 Array Management Commands:
     create                          Create a new array with interactive disk assignment
@@ -214,8 +221,11 @@ get_all_nmdstat_values() {
         array_ref["$key"]="$value"
     done < <(cat "$PROC_NMDSTAT" 2>/dev/null)
 
+    # Store timestamp when data was read
+    array_ref["timestamp"]=$(date +%s)
+
     # Return success only if we read something
-    [ ${#array_ref[@]} -gt 0 ]
+    [ ${#array_ref[@]} -gt 1 ]
 }
 
 # Get value from nmdstat (for backward compatibility)
@@ -704,11 +714,18 @@ collect_resync_status() {
             eta_seconds=$(( remaining_blocks / rate ))
         fi
 
+        # Calculate actual elapsed time from start of resync operation
+        local elapsed_seconds=0
+        local sbsynced="${NMDSTAT_VALUES[sbSynced]}"
+        if [ "$sbsynced" != "0" ] && [ -n "$sbsynced" ]; then
+            elapsed_seconds=$(($(printf "%(%s)T")-sbsynced))
+        fi
+
         RESYNC_STATUS_DATA["progress_percent"]="$progress"
         RESYNC_STATUS_DATA["position_gb"]=$(convert_blocks_to_gb "$mdresyncpos" 2)
         RESYNC_STATUS_DATA["size_gb"]=$(convert_blocks_to_gb "$mdresyncsize" 0)
         RESYNC_STATUS_DATA["rate_mb_s"]="$rate_mb"
-        RESYNC_STATUS_DATA["elapsed_seconds"]="$mdresyncdt"
+        RESYNC_STATUS_DATA["elapsed_seconds"]="$elapsed_seconds"
         RESYNC_STATUS_DATA["eta_seconds"]="$eta_seconds"
     fi
 }
@@ -716,11 +733,6 @@ collect_resync_status() {
 # Collect disk status data
 collect_disk_status() {
     local mdstate="${NMDSTAT_VALUES[mdState]}"
-
-    # Clear previous disk data
-    for key in "${!DISK_STATUS_DATA[@]}"; do
-        unset 'DISK_STATUS_DATA["$key"]'
-    done
 
     # Store general disk status information
     DISK_STATUS_DATA["array_started"]="false"
@@ -968,17 +980,29 @@ format_human_disk_status() {
     echo ""
 
     if [ "$array_started" = "true" ]; then
-        if [ "$VERBOSE" -eq 1 ]; then
-            echo -e "Slot  Status               Device      Size(1k)  Disk Name   FS            Mountpoint        Usage     Drive ID"
-            echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------  -------------------------------------"
+        if [ "$MONITOR_MODE" -eq 1 ]; then
+            # Monitor mode with I/O columns
+            if [ "$VERBOSE" -eq 1 ]; then
+                echo -e "Slot  Status               Device      Size(1k)     Disk Name   FS            Mountpoint        Usage     Read(MB/s)  Write(MB/s)  Drive ID"
+                echo -e "----  -------------------  ----------  -----------  ----------  ------------  ---------------   --------  ----------  -----------  -------------------------------------"
+            else
+                echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage     Read(MB/s)  Write(MB/s)"
+                echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------  ----------  -----------"
+            fi
         else
-            echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage"
-            echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------"
+            # Regular mode without I/O column
+            if [ "$VERBOSE" -eq 1 ]; then
+                echo -e "Slot  Status               Device      Size(1k)     Disk Name   FS            Mountpoint        Usage     Drive ID"
+                echo -e "----  -------------------  ----------  -----------  ----------  ------------  ---------------   --------  -------------------------------------"
+            else
+                echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage"
+                echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------"
+            fi
         fi
     else
         if [ "$VERBOSE" -eq 1 ]; then
-            echo -e "Slot  Status               Device      Size(1k)  Drive ID"
-            echo -e "----  -------------------  ----------  --------  -------------------------------------"
+            echo -e "Slot  Status               Device      Size(1k)     Drive ID"
+            echo -e "----  -------------------  ----------  -----------  -------------------------------------"
         else
             echo -e "Slot  Status               Device      Size(GB)"
             echo -e "----  -------------------  ----------  --------"
@@ -1044,18 +1068,37 @@ format_human_disk_entry() {
             fs_type="$slottype"
         fi
 
-        if [ "$VERBOSE" -eq 1 ]; then
-            printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s  %s\n" \
-                "$rdevname" "$disksize" "${diskname:-$slot_display}" \
-                "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}" "$diskid"
+        if [ "$MONITOR_MODE" -eq 1 ]; then
+            # Monitor mode with I/O columns
+            local read_rate_formatted=$(format_io_rate "${DISK_STATUS_DATA[slot_${idx}_read_rate_scaled]:-0}")
+            local write_rate_formatted=$(format_io_rate "${DISK_STATUS_DATA[slot_${idx}_write_rate_scaled]:-0}")
+
+            if [ "$VERBOSE" -eq 1 ]; then
+                printf "%-10s  %-11s  %-10s  %-12s  %-16s  %-8s  %-10s  %-11s  %s\n" \
+                    "$rdevname" "$disksize" "${diskname:-$slot_display}" \
+                    "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}" \
+                    "$read_rate_formatted" "$write_rate_formatted" "$diskid"
+            else
+                printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s  %-10s  %-11s\n" \
+                    "$rdevname" "$sizegb" "${diskname:-$slot_display}" \
+                    "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}" \
+                    "$read_rate_formatted" "$write_rate_formatted"
+            fi
         else
-            printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s\n" \
-                "$rdevname" "$sizegb" "${diskname:-$slot_display}" \
-                "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}"
+            # Regular mode without I/O column
+            if [ "$VERBOSE" -eq 1 ]; then
+                printf "%-10s  %-11s  %-10s  %-12s  %-16s  %-8s  %s\n" \
+                    "$rdevname" "$disksize" "${diskname:-$slot_display}" \
+                    "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}" "$diskid"
+            else
+                printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s\n" \
+                    "$rdevname" "$sizegb" "${diskname:-$slot_display}" \
+                    "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}"
+            fi
         fi
     else
         if [ "$VERBOSE" -eq 1 ]; then
-            printf "%-10s  %-8s  %s\n" "$rdevname" "$disksize" "$diskid"
+            printf "%-10s  %-11s  %s\n" "$rdevname" "$disksize" "$diskid"
         else
             printf "%-10s  %-8s\n" "$rdevname" "$sizegb"
         fi
@@ -1344,6 +1387,241 @@ format_output() {
             ;;
     esac
 }
+
+# Terminal manipulation functions for monitor mode
+# Inspired by fff
+setup_monitor_terminal() {
+    # Setup terminal for TUI monitoring mode
+    # '\e[?1049h': Use alternative screen buffer
+    # '\e[?7l':    Disable line wrapping
+    # '\e[?25l':   Hide cursor
+    # '\e[2J':     Clear screen
+    printf '\e[?1049h\e[?7l\e[?25l\e[2J'
+
+    # Hide echoing of user input
+    stty -echo 2>/dev/null || true
+}
+
+reset_monitor_terminal() {
+    # Reset terminal to normal state
+    # '\e[?7h':    Re-enable line wrapping
+    # '\e[?25h':   Show cursor
+    # '\e[2J':     Clear screen
+    # '\e[?1049l': Restore main screen buffer
+    printf '\e[?7h\e[?25h\e[2J\e[?1049l'
+
+    # Show user input
+    stty echo 2>/dev/null || true
+}
+
+update_monitor_line() {
+    # Update line, clear remainder
+    # '\r': Return to beginning of line
+    # '\e[K': Clear line from cursor right
+    printf '\r%s\e[K\n' "$1"
+}
+
+update_status_bar() {
+    # Update a full-width status bar line with background color
+    local text="$1"
+    local bg_color="$2"
+
+    local term_width
+    term_width=$(tput cols 2>/dev/null || echo "80")
+    local visible_length=${#text}
+
+    # Create padding to fill the entire line
+    local padding_length=$((term_width - visible_length))
+    [[ $padding_length -lt 0 ]] && padding_length=0
+    local padding=$(printf "%*s" "$padding_length" "")
+
+    # Print the status bar: move to start, write content with background color and padding, clear remainder
+    printf '\r%b%s%s%b\e[K\n' "$bg_color" "$text" "$padding" "$NC"
+}
+
+calculate_disk_io_rates() {
+    # Calculate I/O rates for each disk based on previous readings
+    local current_timestamp="${NMDSTAT_VALUES[timestamp]}"
+
+    # If no previous timestamp, this is the first loop - store current values
+    if [ -z "${DISK_STATUS_DATA[timestamp_prev]}" ]; then
+        for idx in $(seq 0 29); do
+            if [ "${DISK_STATUS_DATA[slot_${idx}_present]}" = "true" ]; then
+                DISK_STATUS_DATA["slot_${idx}_prev_reads"]="${DISK_STATUS_DATA[slot_${idx}_reads]}"
+                DISK_STATUS_DATA["slot_${idx}_prev_writes"]="${DISK_STATUS_DATA[slot_${idx}_writes]}"
+                DISK_STATUS_DATA["slot_${idx}_read_rate_scaled"]="0"
+                DISK_STATUS_DATA["slot_${idx}_write_rate_scaled"]="0"
+                DISK_STATUS_DATA["slot_${idx}_total_rate_scaled"]="0"
+            fi
+        done
+        DISK_STATUS_DATA["timestamp_prev"]="$current_timestamp"
+        return
+    fi
+
+    # Time delta since last measurement
+    local time_diff=$((current_timestamp - DISK_STATUS_DATA[timestamp_prev]))
+    if [ "$time_diff" -le 0 ]; then
+        time_diff=1  # Avoid division by zero
+    fi
+
+    # Calculate rates for each disk
+    for idx in $(seq 0 29); do
+        if [ "${DISK_STATUS_DATA[slot_${idx}_present]}" = "true" ]; then
+            local current_reads="${DISK_STATUS_DATA[slot_${idx}_reads]:-0}"
+            local current_writes="${DISK_STATUS_DATA[slot_${idx}_writes]:-0}"
+            local prev_reads="${DISK_STATUS_DATA[slot_${idx}_prev_reads]:-0}"
+            local prev_writes="${DISK_STATUS_DATA[slot_${idx}_prev_writes]:-0}"
+
+            # Calculate deltas (and handle possible wraparound)
+            local reads_delta=$((current_reads - prev_reads))
+            local writes_delta=$((current_writes - prev_writes))
+            [ "$reads_delta" -lt 0 ] && reads_delta=0
+            [ "$writes_delta" -lt 0 ] && writes_delta=0
+
+            # Driver writes and reads are in 8-sector units = 4kB
+            # Convert to MB/s and multiply by 100 for two decimal place precision
+            local read_rate_scaled=$(( (reads_delta * 100) / (256 * time_diff) ))
+            local write_rate_scaled=$(( (writes_delta * 100) / (256 * time_diff) ))
+            local total_rate_scaled=$(( read_rate_scaled + write_rate_scaled ))
+
+            # Store calculated rates and raw values for next loop
+            DISK_STATUS_DATA["slot_${idx}_read_rate_scaled"]="$read_rate_scaled"
+            DISK_STATUS_DATA["slot_${idx}_write_rate_scaled"]="$write_rate_scaled"
+            DISK_STATUS_DATA["slot_${idx}_total_rate_scaled"]="$total_rate_scaled"
+            DISK_STATUS_DATA["slot_${idx}_prev_reads"]="$current_reads"
+            DISK_STATUS_DATA["slot_${idx}_prev_writes"]="$current_writes"
+        fi
+    done
+
+    DISK_STATUS_DATA["timestamp_prev"]="$current_timestamp"
+}
+
+format_io_rate() {
+    # Input is scaled by 100 (e.g., 250 = 2.50 MB/s)
+    # Convert scaled value back to MB/s with 2 decimals
+    local rate_scaled="$1"
+
+    if [ "$rate_scaled" -gt 0 ]; then
+        local rate_int=$((rate_scaled / 100))
+        local rate_decimal=$((rate_scaled % 100))
+
+        printf "%d.%02d" "$rate_int" "$rate_decimal"
+    else
+        echo -n "-"
+    fi
+}
+
+redraw_monitor_status() {
+    local timestamp="$(date)"
+
+    # Move to top of screen
+    printf '\e[H'
+
+    update_status_bar " NonRAID Array Status Monitor - $timestamp" "$HEADER_BG"
+    update_status_bar " Refresh interval: ${1}s" "$HEADER_BG"
+    update_monitor_line ""
+
+    local status_output
+    status_output="$(format_human_output)"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        update_monitor_line "$line"
+    done <<< "$status_output"
+
+    update_monitor_line ""
+    update_status_bar " Monitor Mode: Press 'q' to quit, 'r' to refresh immediately, '?' for help" "$FOOTER_BG"
+
+    # Clear to end of screen
+    printf '\e[J'
+}
+
+read_key_with_timeout() {
+    # Read a single key with timeout (non-blocking)
+    # Returns 0 if key was pressed, 1 if timeout
+    local timeout="${1:-0.1}"
+
+    if read -rt "$timeout" -n 1 -s key 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+monitor_status_loop() {
+    # Main monitoring loop
+    local interval="$1"
+
+    setup_monitor_terminal
+
+    # Restore terminal on exit
+    trap 'reset_monitor_terminal; exit 0' EXIT INT TERM
+
+    # Initial screen clear
+    printf '\e[2J\e[H'
+
+    while true; do
+        get_all_nmdstat_values NMDSTAT_VALUES
+        collect_array_summary
+        collect_array_health
+        collect_array_size_and_parity
+        collect_resync_status
+        collect_disk_status
+
+        calculate_disk_io_rates
+
+        redraw_monitor_status "$interval"
+
+        local elapsed=0
+        local total_deciseconds=$((interval * 10))
+        local check_deciseconds=1  # 0.1 second = 1 decisecond
+        local should_refresh=0
+
+        while (( elapsed < total_deciseconds )); do
+            if read_key_with_timeout "0.1"; then
+                case "$key" in
+                    'q'|'Q')
+                        reset_monitor_terminal
+                        exit 0
+                        ;;
+                    'r'|'R')
+                        should_refresh=1
+                        break
+                        ;;
+                    'v'|'V')
+                        if [ "$VERBOSE" -eq 1 ]; then
+                            VERBOSE=0
+                        else
+                            VERBOSE=1
+                        fi
+                        should_refresh=1
+                        break
+                        ;;
+                    '?'|'h'|'H')
+                        printf '\e[H\e[J'
+                        echo -e "${YELLOW}Monitor Mode Help:${NC}"
+                        echo ""
+                        echo "  q/Q - Quit monitor mode"
+                        echo "  r/R - Refresh immediately"
+                        echo "  v/V - Toggle verbose mode"
+                        echo "  ?/h/H - Show this help"
+                        echo ""
+                        echo "Press any key to continue..."
+                        read -rn 1 -s
+                        should_refresh=1
+                        break
+                        ;;
+                    *)
+                        ;;
+                esac
+            fi
+            elapsed=$((elapsed + check_deciseconds))
+        done
+
+        # If refresh was requested, continue to next iteration
+        [[ $should_refresh -eq 1 ]] && continue
+    done
+}
+
 # Show current array status
 show_status() {
     if ! check_nmdstat_exists; then
@@ -1371,6 +1649,15 @@ show_status() {
                 output_format="$2"
                 shift 2
                 ;;
+            "-m"|"--monitor")
+                MONITOR_MODE=1
+                if [[ "$2" =~ ^[0-9]+$ ]] && [ "$2" -gt 0 ]; then
+                    MONITOR_INTERVAL="$2"
+                    shift 2
+                else
+                    shift
+                fi
+                ;;
             *)
                 echo -e "${RED}Error: Unknown option for ${YELLOW}nmdctl status${NC}: $1${NC}"
                 return 1
@@ -1391,6 +1678,18 @@ show_status() {
             return 1
             ;;
     esac
+
+    # Handle monitor mode
+    if [ "$MONITOR_MODE" -eq 1 ]; then
+        # Monitor mode is incompatible with non-default output formats
+        if [ "$output_format" != "default" ]; then
+            echo -e "${RED}Error: Monitor mode only supports default output format${NC}"
+            return 1
+        fi
+
+        monitor_status_loop "$MONITOR_INTERVAL"
+        return $?
+    fi
 
     # Print default format header early - makes the command feel more snappy
     if [ "$output_format" == "default" ]; then
@@ -3630,6 +3929,8 @@ main() {
                 BLUE=""
                 YELLOW=""
                 NC=""
+                HEADER_BG=""
+                FOOTER_BG=""
                 shift
                 ;;
             "-V"|"--version")

@@ -6,6 +6,8 @@ export DH_VERBOSE=1
 
 override_dh_installsystemd:
 	dh_installsystemd --name=nonraid --no-stop-on-upgrade --no-start
+	dh_installsystemd --name=nonraid-parity-check --no-stop-on-upgrade --no-start --no-enable nonraid-parity-check.service
+	dh_installsystemd --name=nonraid-parity-check nonraid-parity-check.timer
 
 override_dh_installinit:
 	dh_installinit -n --name nonraid

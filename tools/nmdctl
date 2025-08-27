@@ -503,14 +503,19 @@ collect_array_health() {
     local last_sync_human="${YELLOW}never${NC}"
     local last_sync_timestamp=0
     local last_sync_ago=0
+    local last_sync_elapsed=0
     local last_sync_status=""
 
     if [ "$sbsynced2" != "0" ]; then
         last_sync_timestamp=$sbsynced2
         last_sync_ago=$(($(printf "%(%s)T")-sbsynced2))
+        last_sync_elapsed=$((sbsynced2 - sbsynced))
         last_sync_human="$(format_time_duration "$last_sync_ago") ago"
-        if [ "$last_sync_ago" -gt 2592000 ]; then
-            last_sync_human="${YELLOW}$last_sync_human${NC} (more than 30 days)"
+        if [ "$last_sync_ago" -gt 8640000 ]; then
+            last_sync_human="${YELLOW}$last_sync_human${NC} (more than 100 days)"
+        fi
+        if [ "$VERBOSE" -gt 0 ]; then
+            last_sync_human="$last_sync_human - completed in $(format_time_duration "$last_sync_elapsed")"
         fi
         if [ "$sbsyncexit" -gt 0 ]; then
             last_sync_human="$last_sync_human ${RED}(errors encountered)${NC}"
@@ -529,6 +534,7 @@ collect_array_health() {
     ARRAY_STATUS_DATA["last_sync_timestamp"]="$last_sync_timestamp"
     ARRAY_STATUS_DATA["last_sync_ago"]="$last_sync_ago"
     ARRAY_STATUS_DATA["last_sync_status"]="$last_sync_status"
+    ARRAY_STATUS_DATA["last_sync_elapsed"]="$last_sync_elapsed"
 
     # Determine health status
     local health_status=""
@@ -1188,6 +1194,11 @@ format_prometheus_output() {
     echo "# TYPE nonraid_last_sync_age_seconds gauge"
     echo "nonraid_last_sync_age_seconds{label=\"$label\"} ${ARRAY_STATUS_DATA[last_sync_ago]}"
 
+    echo ""
+    echo "# HELP nonraid_last_sync_elapsed_seconds Seconds elapsed for last completed sync"
+    echo "# TYPE nonraid_last_sync_elapsed_seconds gauge"
+    echo "nonraid_last_sync_elapsed_seconds{label=\"$label\"} ${ARRAY_STATUS_DATA[last_sync_elapsed]}"
+
     # Resync operation metrics
     echo ""
     echo "# HELP nonraid_resync_active Whether a resync operation is active (0=no, 1=yes)"
@@ -1296,6 +1307,7 @@ format_json_output() {
     echo "    \"last_sync\": {"
     echo "      \"timestamp\": ${ARRAY_STATUS_DATA[last_sync_timestamp]},"
     echo "      \"age_seconds\": ${ARRAY_STATUS_DATA[last_sync_ago]},"
+    echo "      \"elapsed_seconds\": ${ARRAY_STATUS_DATA[last_sync_elapsed]},"
     echo "      \"status\": \"${ARRAY_STATUS_DATA[last_sync_status]}\""
     echo "    }"
     echo "  },"

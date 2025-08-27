@@ -87,6 +87,22 @@ sudo apt install linux-headers-$(uname -r) nonraid-dkms nonraid-tools
 > [!TIP]
 > This PPA has been tested to work on Ubuntu 24.04 LTS and Debian 12/13, though on Debian you need to manually add the repository and the signing key.
 
+<details>
+<summary>PPA setup for Debian</summary>
+
+```bash
+# Install gpg
+sudo apt install gpg
+
+# Add the PPA signing key
+wget -qO- "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x0B1768BC3340D235F3A5CB25186129DABB062BFD" | sudo gpg --dearmor -o /usr/share/keyrings/nonraid-ppa.gpg
+
+# Add the PPA repository
+echo "deb [signed-by=/usr/share/keyrings/nonraid-ppa.gpg] https://ppa.launchpadcontent.net/qvr/nonraid/ubuntu noble main" | sudo tee /etc/apt/sources.list.d/nonraid-ppa.list
+```
+
+</details>
+
 ### Option 2: Install from GitHub Releases
 
 1. Download the latest packages from separate releases:

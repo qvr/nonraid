@@ -87,6 +87,22 @@ sudo apt install linux-headers-$(uname -r) nonraid-dkms nonraid-tools
 > [!TIP]
 > This PPA has been tested to work on Ubuntu 24.04 LTS and Debian 12/13, though on Debian you need to manually add the repository and the signing key.
 
+<details>
+<summary>PPA setup for Debian</summary>
+
+```bash
+# Install gpg
+sudo apt install gpg
+
+# Add the PPA signing key
+wget -qO- "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x0B1768BC3340D235F3A5CB25186129DABB062BFD" | sudo gpg --dearmor -o /usr/share/keyrings/nonraid-ppa.gpg
+
+# Add the PPA repository
+echo "deb [signed-by=/usr/share/keyrings/nonraid-ppa.gpg] https://ppa.launchpadcontent.net/qvr/nonraid/ubuntu noble main" | sudo tee /etc/apt/sources.list.d/nonraid-ppa.list
+```
+
+</details>
+
 ### Option 2: Install from GitHub Releases
 
 1. Download the latest packages from separate releases:
@@ -138,11 +154,20 @@ The command line [nmdctl tool](tools/nmdctl) handles common NonRAID array operat
 
 ### Display array status
 
-Displays the status of the array and individual disks. Displays detected filesystems, mountpoints and filesystem usage. Drive ID's are also displayed if global `--verbose` option is set.
+Displays the status of the array and individual disks. Displays detected filesystems, mountpoints and filesystem usage. Drive ID's are also displayed if `--verbose` option is set.
+
 ```bash
-sudo nmdctl [--no-color] status [--verbose] [--no-fs] [-o OUTPUT]
+sudo nmdctl [--no-color] status [--verbose] [--no-fs] [-o OUTPUT] [--monitor [INTERVAL]]
 ```
-Exits with an error code if there are any issues with the array, so this can be used as a simple monitoring in a cronjob. `--no-fs` option can be used to skip displaying filesystem information, making the status check slightly more faster. The `-o (--output)` option allows specifying the output format as `default`, `prometheus`, or `json`. Global `--no-color` option disables `nmdctl` colored output, making it more suitable for cron emails.
+
+Options:
+- `--verbose` - Show detailed status information including drive IDs
+- `--no-fs` - Skip displaying filesystem information (slightly faster)
+- `-o, --output FORMAT` - Specify output format: `default`, `prometheus`, or `json`
+- `--monitor [INTERVAL]` - Enable monitor mode, refreshing every INTERVAL seconds (default: 2)
+- `--no-color` (global option) - Disable colored output, suitable for cron emails
+
+Exits with an error code if there are any issues with the array, so this can also be used as a simple array monitoring in a cronjob.
 
 ### Create a new array (interactive)
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=NonRAID scheduled parity check
+Requires=nonraid.service
+After=nonraid.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/nonraid
+ExecStart=nmdctl -u check nocorrect

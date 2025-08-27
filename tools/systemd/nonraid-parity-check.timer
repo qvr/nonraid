@@ -1,0 +1,11 @@
+[Unit]
+Description=NonRAID quarterly parity check timer
+Requires=nonraid-parity-check.service
+
+[Timer]
+OnCalendar=quarterly
+Persistent=true
+RandomizedDelaySec=3600
+
+[Install]
+WantedBy=timers.target

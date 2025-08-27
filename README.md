@@ -138,11 +138,20 @@ The command line [nmdctl tool](tools/nmdctl) handles common NonRAID array operat
 
 ### Display array status
 
-Displays the status of the array and individual disks. Displays detected filesystems, mountpoints and filesystem usage. Drive ID's are also displayed if global `--verbose` option is set.
+Displays the status of the array and individual disks. Displays detected filesystems, mountpoints and filesystem usage. Drive ID's are also displayed if `--verbose` option is set.
+
 ```bash
-sudo nmdctl [--no-color] status [--verbose] [--no-fs] [-o OUTPUT]
+sudo nmdctl [--no-color] status [--verbose] [--no-fs] [-o OUTPUT] [--monitor [INTERVAL]]
 ```
-Exits with an error code if there are any issues with the array, so this can be used as a simple monitoring in a cronjob. `--no-fs` option can be used to skip displaying filesystem information, making the status check slightly more faster. The `-o (--output)` option allows specifying the output format as `default`, `prometheus`, or `json`. Global `--no-color` option disables `nmdctl` colored output, making it more suitable for cron emails.
+
+Options:
+- `--verbose` - Show detailed status information including drive IDs
+- `--no-fs` - Skip displaying filesystem information (slightly faster)
+- `-o, --output FORMAT` - Specify output format: `default`, `prometheus`, or `json`
+- `--monitor [INTERVAL]` - Enable monitor mode, refreshing every INTERVAL seconds (default: 2)
+- `--no-color` (global option) - Disable colored output, suitable for cron emails
+
+Exits with an error code if there are any issues with the array, so this can also be used as a simple array monitoring in a cronjob.
 
 ### Create a new array (interactive)
 

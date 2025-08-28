@@ -21,8 +21,8 @@ Unlike in UnRAID, where the driver replaces the kernel's standard `md` driver, t
 While this is a fork, we try to keep the changes to driver minimal to make syncs with upstream easier. The driver currently has patches to rebrand and separate the module from `md` and from `raid6_pq`, and a couple of patches to prevent kernel crashes if starting the array without importing all disks first or importing in the "wrong" order.
 
 > [!WARNING]
-> :radioactive: This is an experimental project, the driver has not really been tested outside of virtualized dev environment and data loss is a possibility.
-> This is intended for DIY enthusiasts who want to try out the disk array tech without installing UnRAID.
+> :radioactive: This is an early-stage project, and while the driver and `nmdctl` management tool have been tested in both virtualized environments and some physical setups, data loss is still a possibility.
+> This is mainly intended for DIY enthusiasts comfortable with Linux command line usage.
 >
 > Use at your own risk, and always have backups!
 
@@ -65,7 +65,7 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 The supported kernel version ranges might be inaccurate, the driver has been tested to work on **Ubuntu 24.04 LTS** GA kernel (6.8.0) and HWE kernels (6.11 and 6.14), on **Debian 12** (6.1) and on **Debian 13** (6.12). Note that kernel versions 6.9 and 6.10 are not supported. You can report other distributions and kernel versions that work in the [discussions](https://github.com/qvr/nonraid/discussions).
 
 > [!NOTE]
-> Ubuntu 24.04 LTS HWE kernel users should be aware that future HWE kernel version changes might include kernel ABI changes that could cause the driver to stop working until an update is released.
+> Ubuntu 24.04 LTS HWE kernel users should be aware that future HWE kernel version changes might include kernel API changes that could cause the driver to stop working until an update is released.
 
 ## Installation
 
@@ -248,7 +248,11 @@ sudo nmdctl unmount
 
 ### Start/stop a parity check
 
-This will also start reconstruction or clear operations depending on the array state, user confirmation is required if a normal parity check is not being started. In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`), this is recommended for scheduled parity checks (like a cronjob).
+Starts or stops a parity check. This will also start reconstruction or clear operations depending on the array state, user confirmation is required if a normal parity check is not being started.
+
+The NonRAID [systemd service](tools/systemd/nonraid.service) will trigger a corrective parity check, if it detects an unclean shutdown has happened.
+
+In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`), this is recommended for scheduled parity checks and used by the included [quarterly systemd timer](tools/systemd/nonraid-parity-check.timer).
 ```bash
 sudo nmdctl check OPTION
 ```

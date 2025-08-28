@@ -58,6 +58,8 @@ jobs:
 
           cp systemd/nonraid.service debian/nonraid-tools.nonraid.service
           cp systemd/nonraid.default debian/nonraid-tools.nonraid.default
+          cp systemd/nonraid-parity-check.service debian/nonraid-tools.nonraid-parity-check.service
+          cp systemd/nonraid-parity-check.timer debian/nonraid-tools.nonraid-parity-check.timer
           echo "::endgroup::"
 
           echo "::group::Build Debian Binary Package"

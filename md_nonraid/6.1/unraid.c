@@ -1717,7 +1717,7 @@ void unraid_make_request(mddev_t *mddev, int unit, struct bio *bi)
 	sector_t stripe_sector, last_sector;
 
 	if (md_trace >= 3)
-		printk("unraid_make_request: unit=%d rwa=%x sector=%llu nsect=%u vcnt=%u\n",
+		printk("nonraid_make_request: unit=%d rwa=%x sector=%llu nsect=%u vcnt=%u\n",
 		       unit, bi->bi_opf, (unsigned long long)bi->bi_iter.bi_sector, (bi->bi_iter.bi_size>>9), bi->bi_vcnt);
 
 	/* check for requests before we're running */
@@ -1793,7 +1793,7 @@ static void unraidd(mddev_t *mddev, unsigned long unit)
 	int count = 0;
 	struct blk_plug plug;
 
-	dprintk("unraidd%d: activated\n", (int)unit);
+	dprintk("nonraidd%d: activated\n", (int)unit);
 
 	blk_start_plug(&plug);
 
@@ -1821,7 +1821,7 @@ static void unraidd(mddev_t *mddev, unsigned long unit)
 
 	blk_finish_plug(&plug);
 
-        dprintk("unraidd%d: handled %d stripes\n", (int)unit, count);
+        dprintk("nonraidd%d: handled %d stripes\n", (int)unit, count);
 }
 
 /* Resource allocation */
@@ -1872,7 +1872,7 @@ static int grow_stripes(unraid_conf_t *conf, int num)
         size_t stripe_head_size = sizeof(struct stripe_head) + sizeof(column_t)*conf->disks;
 
 	if (conf->slab_cache == NULL) {
-                conf->slab_cache = kmem_cache_create("unraid/md", stripe_head_size, 0, 0, NULL);
+                conf->slab_cache = kmem_cache_create("nonraid/md", stripe_head_size, 0, 0, NULL);
                 if (conf->slab_cache == NULL)
                         return 0;
         }
@@ -1998,10 +1998,10 @@ int unraid_run(mddev_t *mddev)
 
                 INIT_LIST_HEAD(&conf->handle_list[i]);
 
-                sprintf( name, "unraidd%d", i);
+                sprintf( name, "nonraidd%d", i);
                 conf->thread[i] = md_register_thread(unraidd, mddev, i, name);
                 if (!conf->thread[i]) {
-                        printk("unraid: couldn't allocate %s thread\n", name);
+                        printk("nonraid: couldn't allocate %s thread\n", name);
                         goto abort;
                 }
         }
@@ -2013,11 +2013,11 @@ int unraid_run(mddev_t *mddev)
 	/* allocate the stripe cache */
 	memory = md_num_stripes *
 		(sizeof(struct stripe_head) + (conf->disks * PAGE_SIZE)) / 1024;
-	printk("unraid: allocating %uK for %d stripes (%d disks)\n",
+	printk("nonraid: allocating %uK for %d stripes (%d disks)\n",
 	       memory, md_num_stripes, conf->disks);
 
 	if (!grow_stripes(conf, md_num_stripes)) {
-		printk("unraid: couldn't allocate stripe cache\n");
+		printk("nonraid: couldn't allocate stripe cache\n");
 		shrink_stripes(conf, conf->num_stripes);
 		goto abort;
 	}
@@ -2033,7 +2033,7 @@ abort:
 		kfree(conf);
 		mddev->private = NULL;
 	}
-	printk("unraid: failed to run\n");
+	printk("nonraid: failed to run\n");
 	return -EIO;
 }
 
@@ -2047,11 +2047,11 @@ int unraid_stop(mddev_t *mddev)
                 for (i = 0; i <= conf->disks-2; i++) {
                         n = atomic_read(&conf->active_stripes[i]);
                         if (n)
-                                printk("unraid_stop: called with %d active stripes!\n", n);
+                                printk("nonraid_stop: called with %d active stripes!\n", n);
                 }
 		n = atomic_read(&conf->active_flushes);
 		if (n)
-			printk("unraid_stop: called with %d active flushes!\n", n);
+			printk("nonraid_stop: called with %d active flushes!\n", n);
 
 		shrink_stripes(conf, conf->num_stripes);
 

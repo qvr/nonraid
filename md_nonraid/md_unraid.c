@@ -1011,7 +1011,7 @@ static int do_run(mddev_t *mddev)
 	/* alloc transfer resources */
 	err = unraid_run(mddev);
 	if (err) {
-		printk("nmd: unraid_run: failed: %d\n", err);
+		printk("nmd: nonraid_run: failed: %d\n", err);
 		return -EINVAL;
 	}
 

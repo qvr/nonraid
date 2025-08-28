@@ -248,7 +248,11 @@ sudo nmdctl unmount
 
 ### Start/stop a parity check
 
-This will also start reconstruction or clear operations depending on the array state, user confirmation is required if a normal parity check is not being started. In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`), this is recommended for scheduled parity checks (like a cronjob).
+Starts or stops a parity check. This will also start reconstruction or clear operations depending on the array state, user confirmation is required if a normal parity check is not being started.
+
+The NonRAID [systemd service](tools/systemd/nonraid.service) will trigger a corrective parity check, if it detects an unclean shutdown has happened.
+
+In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`), this is recommended for scheduled parity checks and used by the included [quarterly systemd timer](tools/systemd/nonraid-parity-check.timer).
 ```bash
 sudo nmdctl check OPTION
 ```

@@ -1043,12 +1043,10 @@ format_human_disk_entry() {
     local array_started="${DISK_STATUS_DATA[array_started]}"
 
     local status_formatted=$(format_disk_status "$rdevstatus")
-    local visible_length=$(get_status_visible_length "$rdevstatus")
 
     # Add indicator for disk errors
     if [ -n "$rdevnumerrors" ] && [ "$rdevnumerrors" -gt 0 ]; then
         status_formatted="$status_formatted $(echo -e "${RED}($rdevnumerrors errs)${NC}")"
-        visible_length=$((visible_length + ${#rdevnumerrors} + 8))
     fi
 
     # Display slot identifier
@@ -1059,6 +1057,7 @@ format_human_disk_entry() {
         slot_display="Q"
     fi
 
+    local visible_length=$(get_visible_length "$status_formatted")
     printf "%-4s  " "$slot_display"
     printf "%s" "$status_formatted"
     printf "%$((21 - visible_length))s" " "
@@ -1366,18 +1365,12 @@ format_json_output() {
     echo "}"
 }
 
-# Calculate visible length of disk status for alignment
-get_status_visible_length() {
-    local status="$1"
-    case "$status" in
-        "DISK_OK") echo "2" ;;
-        "DISK_INVALID") echo "7" ;;
-        "DISK_NP_MISSING") echo "7" ;;
-        "DISK_WRONG") echo "5" ;;
-        "DISK_DSBL"|"DISK_NP_DSBL"|"DISK_DSBL_NEW") echo "8" ;;
-        "DISK_NEW") echo "3" ;;
-        *) echo "${#status}" ;;
-    esac
+# Get visible length of a string with ANSI escape codes
+get_visible_length() {
+    local str="$1"
+    shopt -s extglob
+    str="${str//$'\e'\[*([0-9;])m/}"
+    echo "${#str}"
 }
 
 # Main output formatter

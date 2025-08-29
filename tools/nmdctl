@@ -247,7 +247,7 @@ convert_blocks_to_gb() {
     fi
 }
 
-# Format disk status with color - returns colored text with consistent visible width
+# Format disk status
 format_disk_status() {
     local status="$1"
     case "$status" in
@@ -984,130 +984,142 @@ format_human_disk_status() {
     echo ""
     echo "=== Disk Status ==="
     echo ""
+    local disk_entries=()
+    local old_IFS="$IFS"
+    IFS=$'\n'
+    disk_entries=($(get_disk_entries))
+    IFS="$old_IFS"
+
+    local widths=(4 6 6 8)  # Minimum widths: Slot, Status, Device, Size
+    local headers=("Slot" "Status" "Device")
+
+    if [ "$VERBOSE" -eq 1 ]; then
+        headers+=("Size(1k)")
+    else
+        headers+=("Size(GB)")
+    fi
 
     if [ "$array_started" = "true" ]; then
+        headers+=("Disk Name" "FS" "Mountpoint" "Usage")
+        widths+=(9 2 10 5)
+
         if [ "$MONITOR_MODE" -eq 1 ]; then
-            # Monitor mode with I/O columns
-            if [ "$VERBOSE" -eq 1 ]; then
-                echo -e "Slot  Status               Device      Size(1k)     Disk Name   FS            Mountpoint        Usage     Read(MB/s)  Write(MB/s)  Drive ID"
-                echo -e "----  -------------------  ----------  -----------  ----------  ------------  ---------------   --------  ----------  -----------  -------------------------------------"
-            else
-                echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage     Read(MB/s)  Write(MB/s)"
-                echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------  ----------  -----------"
-            fi
-        else
-            # Regular mode without I/O column
-            if [ "$VERBOSE" -eq 1 ]; then
-                echo -e "Slot  Status               Device      Size(1k)     Disk Name   FS            Mountpoint        Usage     Drive ID"
-                echo -e "----  -------------------  ----------  -----------  ----------  ------------  ---------------   --------  -------------------------------------"
-            else
-                echo -e "Slot  Status               Device      Size(GB)  Disk Name   FS            Mountpoint        Usage"
-                echo -e "----  -------------------  ----------  --------  ----------  ------------  ---------------   --------"
-            fi
-        fi
-    else
-        if [ "$VERBOSE" -eq 1 ]; then
-            echo -e "Slot  Status               Device      Size(1k)     Drive ID"
-            echo -e "----  -------------------  ----------  -----------  -------------------------------------"
-        else
-            echo -e "Slot  Status               Device      Size(GB)"
-            echo -e "----  -------------------  ----------  --------"
+            headers+=("Read(MB/s)" "Write(MB/s)")
+            widths+=(10 11)
         fi
     fi
 
-    # Display parity disks first (P, Q)
-    for idx in 0 29; do
-        if [ "${DISK_STATUS_DATA[slot_${idx}_present]}" = "true" ]; then
-            format_human_disk_entry "$idx"
+    if [ "$VERBOSE" -eq 1 ]; then
+        headers+=("Drive ID")
+        widths+=(12)
+    fi
+
+    # Update column widths based on actual data lengths
+    for entry in "${disk_entries[@]}"; do
+        IFS='|' read -r slot slot_display status_formatted device size diskname fs mountpoint usage read_rate write_rate disk_id <<< "$entry"
+
+        local slot_len=${#slot_display}
+        [ "$slot_len" -gt "${widths[0]}" ] && widths[0]=$slot_len
+
+        local status_len=$(get_visible_length "$status_formatted")
+        [ "$status_len" -gt "${widths[1]}" ] && widths[1]=$status_len
+
+        local device_len=${#device}
+        [ "$device_len" -gt "${widths[2]}" ] && widths[2]=$device_len
+
+        local size_len=${#size}
+        [ "$size_len" -gt "${widths[3]}" ] && widths[3]=$size_len
+
+        if [ "$array_started" = "true" ]; then
+            local diskname_len=${#diskname}
+            [ "$diskname_len" -gt "${widths[4]}" ] && widths[4]=$diskname_len
+
+            local fs_len=${#fs}
+            [ "$fs_len" -gt "${widths[5]}" ] && widths[5]=$fs_len
+
+            local mountpoint_len=${#mountpoint}
+            [ "$mountpoint_len" -gt "${widths[6]}" ] && widths[6]=$mountpoint_len
+
+            local usage_len=${#usage}
+            [ "$usage_len" -gt "${widths[7]}" ] && widths[7]=$usage_len
+
+            if [ "$MONITOR_MODE" -eq 1 ]; then
+                local read_len=${#read_rate}
+                [ "$read_len" -gt "${widths[8]}" ] && widths[8]=$read_len
+
+                local write_len=${#write_rate}
+                [ "$write_len" -gt "${widths[9]}" ] && widths[9]=$write_len
+            fi
+        fi
+
+        if [ "$VERBOSE" -eq 1 ]; then
+            local last_idx=$((${#widths[@]} - 1))
+            local disk_id_len=${#disk_id}
+            [ "$disk_id_len" -gt "${widths[last_idx]}" ] && widths[last_idx]=$disk_id_len
         fi
     done
 
-    # Display data disks (1-28)
-    for idx in $(seq 1 28); do
-        if [ "${DISK_STATUS_DATA[slot_${idx}_present]}" = "true" ]; then
-            format_human_disk_entry "$idx"
+    # Build and display header
+    local header=""
+    local separator=""
+    for i in "${!headers[@]}"; do
+        local dashes=""
+        printf -v dashes "%*s" "${widths[i]}" ""
+        dashes="${dashes// /-}"
+
+        if [ "$i" -eq 0 ]; then
+            header+=$(printf "%-*s" "${widths[i]}" "${headers[i]}")
+            separator+=$(printf "%-*s" "${widths[i]}" "$dashes")
+        else
+            header+=$(printf "  %-*s" "${widths[i]}" "${headers[i]}")
+            separator+=$(printf "  %-*s" "${widths[i]}" "$dashes")
         fi
+    done
+
+    echo -e "$header"
+    echo -e "$separator"
+
+    # Display all disk entries using dynamic column widths
+    for entry in "${disk_entries[@]}"; do
+        format_disk_entry_line "$entry" "${widths[@]}"
     done
 }
 
-format_human_disk_entry() {
-    local idx="$1"
-    local slottype="${DISK_STATUS_DATA[slot_${idx}_type]}"
-    local disksize="${DISK_STATUS_DATA[slot_${idx}_size_kb]}"
-    local sizegb="${DISK_STATUS_DATA[slot_${idx}_size_gb]}"
-    local rdevname="${DISK_STATUS_DATA[slot_${idx}_device]}"
-    local rdevstatus="${DISK_STATUS_DATA[slot_${idx}_status]}"
-    local rdevnumerrors="${DISK_STATUS_DATA[slot_${idx}_errors]}"
-    local diskid="${DISK_STATUS_DATA[slot_${idx}_disk_id]}"
-    local diskname="${DISK_STATUS_DATA[slot_${idx}_disk_name]}"
+# Format and display a single disk entry line using provided column widths
+format_disk_entry_line() {
+    local entry="$1"
+    shift
+    local widths=("$@")
     local array_started="${DISK_STATUS_DATA[array_started]}"
 
-    local status_formatted=$(format_disk_status "$rdevstatus")
+    IFS='|' read -r slot slot_display status_formatted device size diskname fs mountpoint usage read_rate write_rate disk_id <<< "$entry"
 
-    # Add indicator for disk errors
-    if [ -n "$rdevnumerrors" ] && [ "$rdevnumerrors" -gt 0 ]; then
-        status_formatted="$status_formatted $(echo -e "${RED}($rdevnumerrors errs)${NC}")"
-    fi
-
-    # Display slot identifier
-    local slot_display="$idx"
-    if [ "$slottype" = "P" ]; then
-        slot_display="P"
-    elif [ "$slottype" = "Q" ]; then
-        slot_display="Q"
-    fi
+    printf "%-*s" "${widths[0]}" "$slot_display"
 
     local visible_length=$(get_visible_length "$status_formatted")
-    printf "%-4s  " "$slot_display"
-    printf "%s" "$status_formatted"
-    printf "%$((21 - visible_length))s" " "
+    printf "  %s" "$status_formatted"
+    printf "%*s" "$((widths[1] - visible_length))" ""
+
+    printf "  %-*s" "${widths[2]}" "$device"
+    printf "  %-*s" "${widths[3]}" "$size"
 
     if [ "$array_started" = "true" ]; then
-        local fs_type="${DISK_STATUS_DATA[slot_${idx}_fs_type]:-"-"}"
-        local mountpoint="${DISK_STATUS_DATA[slot_${idx}_mountpoint]:-"-"}"
-        local usage="${DISK_STATUS_DATA[slot_${idx}_usage]:-"-"}"
-
-        # Set defaults for parity disks
-        if [ -n "$slottype" ] && [ "$slottype" != "data" ]; then
-            mountpoint="-"
-            fs_type="$slottype"
-        fi
+        printf "  %-*s" "${widths[4]}" "$diskname"
+        printf "  %-*s" "${widths[5]}" "$fs"
+        printf "  %-*s" "${widths[6]}" "$mountpoint"
+        printf "  %-*s" "${widths[7]}" "$usage"
 
         if [ "$MONITOR_MODE" -eq 1 ]; then
-            # Monitor mode with I/O columns
-            local read_rate_formatted=$(format_io_rate "${DISK_STATUS_DATA[slot_${idx}_read_rate_scaled]:-0}")
-            local write_rate_formatted=$(format_io_rate "${DISK_STATUS_DATA[slot_${idx}_write_rate_scaled]:-0}")
-
-            if [ "$VERBOSE" -eq 1 ]; then
-                printf "%-10s  %-11s  %-10s  %-12s  %-16s  %-8s  %-10s  %-11s  %s\n" \
-                    "$rdevname" "$disksize" "${diskname:-$slot_display}" \
-                    "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}" \
-                    "$read_rate_formatted" "$write_rate_formatted" "$diskid"
-            else
-                printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s  %-10s  %-11s\n" \
-                    "$rdevname" "$sizegb" "${diskname:-$slot_display}" \
-                    "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}" \
-                    "$read_rate_formatted" "$write_rate_formatted"
-            fi
-        else
-            # Regular mode without I/O column
-            if [ "$VERBOSE" -eq 1 ]; then
-                printf "%-10s  %-11s  %-10s  %-12s  %-16s  %-8s  %s\n" \
-                    "$rdevname" "$disksize" "${diskname:-$slot_display}" \
-                    "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}" "$diskid"
-            else
-                printf "%-10s  %-8s  %-10s  %-12s  %-16s  %-8s\n" \
-                    "$rdevname" "$sizegb" "${diskname:-$slot_display}" \
-                    "${fs_type:-$slottype}" "${mountpoint:-unmounted}" "${usage:-"-"}"
-            fi
-        fi
-    else
-        if [ "$VERBOSE" -eq 1 ]; then
-            printf "%-10s  %-11s  %s\n" "$rdevname" "$disksize" "$diskid"
-        else
-            printf "%-10s  %-8s\n" "$rdevname" "$sizegb"
+            printf "  %-*s" "${widths[8]}" "$read_rate"
+            printf "  %-*s" "${widths[9]}" "$write_rate"
         fi
     fi
+
+    if [ "$VERBOSE" -eq 1 ]; then
+        printf "  %s" "$disk_id"
+    fi
+
+    printf "\n"
 }
 
 format_prometheus_output() {
@@ -1371,6 +1383,69 @@ get_visible_length() {
     shopt -s extglob
     str="${str//$'\e'\[*([0-9;])m/}"
     echo "${#str}"
+}
+
+# Get formatted disk entries as array of pipe-separated strings
+get_disk_entries() {
+    local entries=()
+
+    for idx in 0 29 $(seq 1 28); do
+        if [ "${DISK_STATUS_DATA[slot_${idx}_present]}" = "true" ]; then
+            entries+=("$(format_disk_entry_data "$idx")")
+        fi
+    done
+
+    printf '%s\n' "${entries[@]}"
+}
+
+# Format a single disk entry as pipe-separated data
+format_disk_entry_data() {
+    local idx="$1"
+    local slottype="${DISK_STATUS_DATA[slot_${idx}_type]}"
+    local disksize="${DISK_STATUS_DATA[slot_${idx}_size_kb]}"
+    local sizegb="${DISK_STATUS_DATA[slot_${idx}_size_gb]}"
+    local rdevname="${DISK_STATUS_DATA[slot_${idx}_device]}"
+    local rdevstatus="${DISK_STATUS_DATA[slot_${idx}_status]}"
+    local rdevnumerrors="${DISK_STATUS_DATA[slot_${idx}_errors]}"
+    local diskid="${DISK_STATUS_DATA[slot_${idx}_disk_id]}"
+    local diskname="${DISK_STATUS_DATA[slot_${idx}_disk_name]}"
+    local array_started="${DISK_STATUS_DATA[array_started]}"
+
+    local status_formatted=$(format_disk_status "$rdevstatus")
+    if [ -n "$rdevnumerrors" ] && [ "$rdevnumerrors" -gt 0 ]; then
+        status_formatted="$status_formatted $(echo -e "${RED}($rdevnumerrors errs)${NC}")"
+    fi
+
+    local slot_display="$idx"
+    if [ "$slottype" = "P" ]; then
+        slot_display="P"
+    elif [ "$slottype" = "Q" ]; then
+        slot_display="Q"
+    fi
+
+    local size_display="$sizegb"
+    if [ "$VERBOSE" -eq 1 ]; then
+        size_display="$disksize"
+    fi
+
+    local diskname_display="${diskname:-$slot_display}"
+    local fs_type="${DISK_STATUS_DATA[slot_${idx}_fs_type]:-"-"}"
+    local mountpoint="${DISK_STATUS_DATA[slot_${idx}_mountpoint]:-"unmounted"}"
+    local usage="${DISK_STATUS_DATA[slot_${idx}_usage]:-"-"}"
+    local read_rate=""
+    local write_rate=""
+
+    if [ -n "$slottype" ] && [ "$slottype" != "data" ]; then
+        mountpoint="-"
+        fs_type="$slottype"
+    fi
+
+    if [ "$MONITOR_MODE" -eq 1 ] && [ "$array_started" = "true" ]; then
+        read_rate=$(format_io_rate "${DISK_STATUS_DATA[slot_${idx}_read_rate_scaled]:-0}")
+        write_rate=$(format_io_rate "${DISK_STATUS_DATA[slot_${idx}_write_rate_scaled]:-0}")
+    fi
+
+    echo "$idx|$slot_display|$status_formatted|$rdevname|$size_display|$diskname_display|$fs_type|$mountpoint|$usage|$read_rate|$write_rate|$diskid"
 }
 
 # Main output formatter

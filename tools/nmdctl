@@ -744,14 +744,30 @@ collect_disk_status() {
     DISK_STATUS_DATA["array_started"]="false"
     [ "$mdstate" = "STARTED" ] && DISK_STATUS_DATA["array_started"]="true"
 
-    # Collect parity disk information (slots 0 and 29)
-    for idx in 0 29; do
+    for idx in $(seq 0 29); do
         local diskname="${NMDSTAT_VALUES[diskName.$idx]}"
         local diskid="${NMDSTAT_VALUES[diskId.$idx]}"
         local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$idx]}"
 
-        # Always display P, display Q if it has an ID OR it's a newly assigned disk
-        if [ "$idx" -eq 0 ] || [ -n "$diskid" ] || [[ "$rdevstatus" == DISK_*_NEW ]]; then
+        # Determine if this slot should be processed
+        local should_process=false
+        local slottype=""
+
+        if [ "$idx" -eq 0 ]; then
+            # Always display P (parity)
+            slottype="P"
+            should_process=true
+        elif [ "$idx" -eq 29 ]; then
+            # Display Q if it has an ID OR it's a newly assigned disk
+            slottype="Q"
+            [ -n "$diskid" ] || [[ "$rdevstatus" == DISK_*_NEW ]] && should_process=true
+        else
+            # Data disks (slots 1-28)
+            slottype="data"
+            [ -n "$diskname" ] || [ "$rdevstatus" = "DISK_NEW" ] && should_process=true
+        fi
+
+        if [ "$should_process" = true ]; then
             local disksize="${NMDSTAT_VALUES[diskSize.$idx]}"
             local rdevname="${NMDSTAT_VALUES[rdevName.$idx]}"
             local rdevnumerrors="${NMDSTAT_VALUES[rdevNumErrors.$idx]}"
@@ -770,13 +786,7 @@ collect_disk_status() {
                 fi
             fi
 
-            local slottype=""
-            if [ "$idx" -eq 0 ]; then
-                slottype="P"
-            elif [ "$idx" -eq 29 ]; then
-                slottype="Q"
-            fi
-
+            # Store common disk data
             if [ -n "$rdevstatus" ]; then
                 DISK_STATUS_DATA["slot_${idx}_present"]="true"
                 DISK_STATUS_DATA["slot_${idx}_type"]="$slottype"
@@ -789,59 +799,20 @@ collect_disk_status() {
                 DISK_STATUS_DATA["slot_${idx}_disk_name"]="${diskname:-none}"
                 DISK_STATUS_DATA["slot_${idx}_reads"]="${rdevreads:-0}"
                 DISK_STATUS_DATA["slot_${idx}_writes"]="${rdevwrites:-0}"
-            fi
-        fi
-    done
 
-    # Collect data disk information (slots 1-28)
-    for idx in $(seq 1 28); do
-        local diskname="${NMDSTAT_VALUES[diskName.$idx]}"
-        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$idx]}"
-
-        if [ -n "$diskname" ] || [ "$rdevstatus" = "DISK_NEW" ]; then
-            local disksize="${NMDSTAT_VALUES[diskSize.$idx]}"
-            local diskid="${NMDSTAT_VALUES[diskId.$idx]}"
-            local rdevname="${NMDSTAT_VALUES[rdevName.$idx]}"
-            local rdevnumerrors="${NMDSTAT_VALUES[rdevNumErrors.$idx]}"
-            local rdevreads="${NMDSTAT_VALUES[rdevReads.$idx]}"
-            local rdevwrites="${NMDSTAT_VALUES[rdevWrites.$idx]}"
-
-            # For DISK_NEW, get size from rdevSize instead of diskSize
-            if [ "$rdevstatus" = "DISK_NEW" ] && { [ -z "$disksize" ] || [ "$disksize" = "0" ]; }; then
-                local rdevsize="${NMDSTAT_VALUES[rdevSize.$idx]}"
-                if [ -n "$rdevsize" ] && [ "$rdevsize" -gt 0 ]; then
-                    disksize="$rdevsize"
-                fi
-
-                if [ -z "$diskid" ]; then
-                    diskid="${NMDSTAT_VALUES[rdevId.$idx]}"
-                fi
-            fi
-
-            DISK_STATUS_DATA["slot_${idx}_present"]="true"
-            DISK_STATUS_DATA["slot_${idx}_type"]="data"
-            DISK_STATUS_DATA["slot_${idx}_size_kb"]="$disksize"
-            DISK_STATUS_DATA["slot_${idx}_size_gb"]=$(convert_blocks_to_gb "$disksize")
-            DISK_STATUS_DATA["slot_${idx}_device"]="${rdevname:-none}"
-            DISK_STATUS_DATA["slot_${idx}_status"]="$rdevstatus"
-            DISK_STATUS_DATA["slot_${idx}_errors"]="${rdevnumerrors:-0}"
-            DISK_STATUS_DATA["slot_${idx}_disk_id"]="$diskid"
-            DISK_STATUS_DATA["slot_${idx}_disk_name"]="${diskname:-none}"
-            DISK_STATUS_DATA["slot_${idx}_reads"]="${rdevreads:-0}"
-            DISK_STATUS_DATA["slot_${idx}_writes"]="${rdevwrites:-0}"
-
-            # Get filesystem information if array is started
-            if [ "$mdstate" = "STARTED" ] && [ -n "$diskname" ] && [ "$diskname" != "none" ] && [ "$NO_FS" -eq 0 ]; then
-                if [ -b "/dev/$diskname" ]; then
-                    local fs_type=$(get_fs_type "/dev/$diskname")
-                    local mountpoint=$(get_mountpoint "$diskname" "$fs_type")
-                    local usage="-"
-                    if [ "$mountpoint" != "unmounted" ] && [ "$mountpoint" != "-" ]; then
-                        usage=$(get_fs_usage "$mountpoint" "$fs_type")
+                # Get filesystem information if array is started
+                if [ "$slottype" = "data" ] && [ "$mdstate" = "STARTED" ] && [ -n "$diskname" ] && [ "$diskname" != "none" ] && [ "$NO_FS" -eq 0 ]; then
+                    if [ -b "/dev/$diskname" ]; then
+                        local fs_type=$(get_fs_type "/dev/$diskname")
+                        local mountpoint=$(get_mountpoint "$diskname" "$fs_type")
+                        local usage="-"
+                        if [ "$mountpoint" != "unmounted" ] && [ "$mountpoint" != "-" ]; then
+                            usage=$(get_fs_usage "$mountpoint" "$fs_type")
+                        fi
+                        DISK_STATUS_DATA["slot_${idx}_fs_type"]="${fs_type:-unknown}"
+                        DISK_STATUS_DATA["slot_${idx}_mountpoint"]="${mountpoint:-unmounted}"
+                        DISK_STATUS_DATA["slot_${idx}_usage"]="$usage"
                     fi
-                    DISK_STATUS_DATA["slot_${idx}_fs_type"]="${fs_type:-unknown}"
-                    DISK_STATUS_DATA["slot_${idx}_mountpoint"]="${mountpoint:-unmounted}"
-                    DISK_STATUS_DATA["slot_${idx}_usage"]="$usage"
                 fi
             fi
         fi

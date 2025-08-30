@@ -3909,10 +3909,10 @@ set_array_setting() {
             if [ -z "$value" ]; then
                 echo -e "${YELLOW}Resetting array label to default (empty)${NC}"
                 value=""
-            elif [[ "$value" =~ ^[a-zA-Z0-9_]{1,32}$ ]]; then
+            elif [[ "$value" =~ ^[a-zA-Z0-9_-]{1,32}$ ]]; then
                 echo -e "${GREEN}Setting array label to '$value'${NC}"
             else
-                echo -e "${RED}Error: Invalid label format. Use alphanumeric characters and underscores only, max 32 characters${NC}"
+                echo -e "${RED}Error: Invalid label format. Use alphanumeric characters, underscores, and dashes only, max 32 characters${NC}"
                 return 1
             fi
             ;;

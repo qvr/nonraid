@@ -136,16 +136,17 @@ EOF
     [ "$result" = "1 days, 1 hours" ]
 }
 
-@test "get_status_visible_length function" {
+@test "get_visible_length function" {
     # Test known status lengths
-    result=$(get_status_visible_length "DISK_OK")
-    [ "$result" -eq 2 ]  # "OK"
+    result=$(get_visible_length "$(echo -e "\033[0;32mDISK_OK\033[0m")")
+    echo "$result"
+    [ "$result" -eq 7 ]
 
-    result=$(get_status_visible_length "DISK_INVALID")
-    [ "$result" -eq 7 ]  # "INVALID"
+    result=$(get_visible_length "$(echo -e "\033[0;31mDISK_INVALID\033[0m")")
+    [ "$result" -eq 12 ]
 
-    result=$(get_status_visible_length "DISK_NP_MISSING")
-    [ "$result" -eq 7 ]  # "MISSING"
+    result=$(get_visible_length "$(echo -e "\033[0;32mDISK_OK\033[0m \033[0;31m10 errs\033[0m")")
+    [ "$result" -eq 15 ]
 }
 
 @test "disk size validation" {

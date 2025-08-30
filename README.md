@@ -253,6 +253,8 @@ Starts or stops a parity check. This will also start reconstruction or clear ope
 The NonRAID [systemd service](tools/systemd/nonraid.service) will trigger a corrective parity check, if it detects an unclean shutdown has happened.
 
 In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`), this is recommended for scheduled parity checks and used by the included [quarterly systemd timer](tools/systemd/nonraid-parity-check.timer).
+
+Note that if a parity check corrects any sync errors, the array status will still stay `DEGRADED` until the next parity check without errors.
 ```bash
 sudo nmdctl check OPTION
 ```

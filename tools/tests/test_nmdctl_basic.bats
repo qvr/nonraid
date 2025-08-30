@@ -136,16 +136,17 @@ EOF
     [ "$result" = "1 days, 1 hours" ]
 }
 
-@test "get_status_visible_length function" {
+@test "get_visible_length function" {
     # Test known status lengths
-    result=$(get_status_visible_length "DISK_OK")
-    [ "$result" -eq 2 ]  # "OK"
+    result=$(get_visible_length "$(echo -e "\033[0;32mDISK_OK\033[0m")")
+    echo "$result"
+    [ "$result" -eq 7 ]
 
-    result=$(get_status_visible_length "DISK_INVALID")
-    [ "$result" -eq 7 ]  # "INVALID"
+    result=$(get_visible_length "$(echo -e "\033[0;31mDISK_INVALID\033[0m")")
+    [ "$result" -eq 12 ]
 
-    result=$(get_status_visible_length "DISK_NP_MISSING")
-    [ "$result" -eq 7 ]  # "MISSING"
+    result=$(get_visible_length "$(echo -e "\033[0;32mDISK_OK\033[0m \033[0;31m10 errs\033[0m")")
+    [ "$result" -eq 15 ]
 }
 
 @test "disk size validation" {
@@ -281,6 +282,26 @@ EOF
     [[ "$output" =~ 5\ errs ]]
     [[ "$output" =~ 10\ errs ]]
     [[ "$output" =~ WARNING.*15\ total ]]
+}
+
+@test "status parsing - Array with Q" {
+    # Create mock with Q disk - need to override the basic template
+    create_mock_nmdstat "STARTED" 0 0 > "$BATS_TMPDIR/mock_nmdstat_dual_parity"
+    sed -i -e 's/diskSize.29=0/diskSize.29=1500000\
+diskId.29=MOCK_PARITY_DISK_2\
+rdevName.29=sdd1\
+rdevStatus.29=DISK_OK\
+rdevNumErrors.29=0/' \
+           "$BATS_TMPDIR/mock_nmdstat_dual_parity"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_dual_parity"
+    run show_status -v
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ Parity.*Dual\ Parity ]]
+    [[ "$output" =~ "sdd1    1500000" ]]
 }
 
 @test "unassigning a disk" {

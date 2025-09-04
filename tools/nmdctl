@@ -2032,6 +2032,7 @@ find_matching_disk() {
 }
 
 # Import disks to array without starting it
+# shellcheck disable=SC2120 # allow optional argument for quiet mode, not used currently
 import_disks() {
     local quiet_mode="${1:-0}"
     check_root
@@ -2268,7 +2269,8 @@ start_array() {
                 echo -e "${YELLOW}Array will run in degraded mode with missing disk(s).${NC}"
                 ;;
             "SWAP_DSBL")
-                echo -e "${YELLOW}Parity disk(s) need to be rearranged.${NC}"
+                echo -e "${YELLOW}Array will do parity swap on start.${NC}"
+                echo -e "${RED}Existing parity disk contents needs to have been manually copied to new parity disk BEFORE starting array!${NC}"
                 ;;
             "ERROR:"*)
                 echo -e "${RED}Array is in ERROR state. Starting may fail or cause data loss.${NC}"
@@ -2802,6 +2804,7 @@ create_array() {
 # Add a new disk to the array
 add_disk() {
     local replace_slot="${1}"
+    local parity_swap=0
     check_root
 
     # Check if module is loaded, will attempt to load if superblock provided
@@ -2828,38 +2831,9 @@ add_disk() {
         return 1
     fi
 
-    if [ "$mdstate" != "STOPPED" ]; then
+    if [ "$mdstate" = "STARTED" ]; then
         echo -e "${RED}Error: Array is currently not in stopped state (${mdstate})${NC}"
         echo -e "${YELLOW}Stop the array first with: ${GREEN}nmdctl stop${NC}"
-        return 1
-    fi
-
-    # Count the number of disks that have been imported
-    local imported_disks=0
-    local total_slots=$(get_defined_slots_count)
-    for slot in $(get_defined_slots); do
-        local rdevname="${NMDSTAT_VALUES[rdevName.$slot]}"
-        if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
-            imported_disks=$((imported_disks + 1))
-        fi
-    done
-
-    if [ -z "$replace_slot" ] && [ "$imported_disks" -lt "$total_slots" ]; then
-        echo -e "${YELLOW}Warning: Not all disks have been imported ($imported_disks/$total_slots)${NC}"
-        echo -e "${YELLOW}It's recommended to import all existing disks before adding a new one${NC}"
-        read -rp "Continue anyway? (y/N): " confirm
-        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-            echo "Operation cancelled."
-            return 1
-        fi
-    fi
-
-    # Check if we have any new disks already
-    local mdnumnew="${NMDSTAT_VALUES[mdNumNew]}"
-    if [ -n "$mdnumnew" ] && [ "$mdnumnew" -gt 0 ]; then
-        echo -e "${RED}Error: Array already has a new disk added${NC}"
-        echo -e "${YELLOW}The driver only supports adding one disk at a time.${NC}"
-        echo -e "${YELLOW}Start the array to process the current new disk first: ${GREEN}nmdctl start${NC}"
         return 1
     fi
 
@@ -2877,8 +2851,26 @@ add_disk() {
             if [ -z "${NMDSTAT_VALUES[diskId.$replace_slot]}" ]; then
                 echo -e "=== ${BLUE}Replacing disk in slot $replace_slot${NC} ==="
             else
-                echo -e "${RED}Error: Unassign slot first with ${GREEN}nmdctl unassign $replace_slot${NC}"
-                return 1
+                if [ "$replace_slot" -eq 0 ] || [ "$replace_slot" -eq 29 ]; then
+                    # Check that array already has an unassigned data slot for parity swap
+                    local has_empty_slot=0
+                    for slot in $(seq 1 28); do
+                        if [ "${NMDSTAT_VALUES[diskSize.$slot]}" -gt 0 ] && [ -z "${NMDSTAT_VALUES[diskId.$slot]}" ]; then
+                            has_empty_slot=1
+                            break
+                        fi
+                    done
+                    if [ "$has_empty_slot" -eq 0 ]; then
+                        echo -e "${RED}Error: No unassigned data slot available for parity swap${NC}"
+                        echo -e "${YELLOW}You must first unassign a data disk slot with ${GREEN}nmdctl unassign SLOT${NC}"
+                        return 1
+                    fi
+                    echo -e "=== ${BLUE}Replacing parity disk in slot $replace_slot${NC} ==="
+                    parity_swap=1
+                else
+                    echo -e "${RED}Error: Unassign slot first with ${GREEN}nmdctl unassign $replace_slot${NC}"
+                    return 1
+                fi
             fi
         else
             echo -e "${RED}Error: Empty slot, add new disk with ${GREEN}nmdctl add${NC}"
@@ -2888,8 +2880,15 @@ add_disk() {
         echo -e "=== ${BLUE}Add New Disk to Array${NC} ==="
     fi
     echo ""
-    echo -e "${YELLOW}This will add a single new disk to the array.${NC}"
-    echo -e "${YELLOW}After adding the disk, you must start the array to process it.${NC}"
+    if [ "$parity_swap" -eq 1 ]; then
+        echo -e "${YELLOW}This will start a parity swap operation on slot $replace_slot.${NC}"
+        echo -e "${YELLOW}The current parity disk can then be replaced into an already unassigned data slot.${NC}"
+        echo -e "${YELLOW}You will then ${RED}need to manually copy${YELLOW} the parity disk contents onto the new parity disk ${RED}BEFORE${YELLOW} array start.${NC}"
+        echo ""
+    else
+        echo -e "${YELLOW}This will add a new disk to the array.${NC}"
+    fi
+    echo -e "${YELLOW}After adding the disk(s), the changes will be committed and new disks processed when the array is started.${NC}"
     echo -e "${YELLOW}Only devices with an unused largest partition will be shown.${NC}"
     echo ""
 
@@ -2907,11 +2906,15 @@ add_disk() {
     local array_disk_ids=()
     for slot in $(seq 0 29); do
         local disk_id="${NMDSTAT_VALUES[diskId.$slot]}"
+        local rdev_status="${NMDSTAT_VALUES[rdevStatus.$slot]}"
         if [ -n "$disk_id" ] && [ "$disk_id" != "none" ]; then
-            array_disk_ids+=("$disk_id")
+            # Allow reuse of parity disk ID if a parity swap is being done
+            if ! { [ "$rdev_status" == "DISK_WRONG" ] && { [ "$slot" -eq 0 ] || [ "$slot" -eq 29 ]; }; }; then
+                array_disk_ids+=("$disk_id")
+            fi
         fi
 
-        # Also check rdevId for newly added disks
+        # Also check rdevId for newly added/already imported disks
         local rdev_id="${NMDSTAT_VALUES[rdevId.$slot]}"
         if [ -n "$rdev_id" ] && [ "$rdev_id" != "none" ]; then
             array_disk_ids+=("$rdev_id")
@@ -2968,7 +2971,8 @@ add_disk() {
         local available_slots=()
         local replaceable_slots=()
         for slot in $(seq 0 29); do
-            if [ -z "${NMDSTAT_VALUES[rdevId.$slot]}" ] && [ -z "${NMDSTAT_VALUES[diskId.$slot]}" ]; then
+
+            if  [ -z "${NMDSTAT_VALUES[rdevId.$slot]}" ] && [ -z "${NMDSTAT_VALUES[diskId.$slot]}" ]; then
                 available_slots+=("$slot")
                 if [ "${NMDSTAT_VALUES[diskSize.$slot]}" -gt 0 ]; then
                     replaceable_slots+=("$slot")
@@ -3121,17 +3125,6 @@ add_disk() {
     echo ""
     echo -e "Adding disk to array..."
 
-    local reload_done=0
-    # If this is a disk replacement, and any slots are currently imported, we need to reload driver before adding the disk
-    if [ "$imported_disks" -gt 0 ] && [ "${NMDSTAT_VALUES[diskSize.$selected_slot]}" -gt 0 ]; then
-        echo -e "${YELLOW}Disk replacement, reloading the nonraid module first...${NC}"
-        if ! reload_module 1; then
-            echo -e "${RED}Error: Failed to reload nonraid module${NC}"
-            return 1
-        fi
-        reload_done=1
-    fi
-
     # Import disk: slot, partition, offset, size, erased, id
     if ! run_nmd_command "import $selected_slot $(basename "$selected_partition") 0 $selected_size_kb 0 $selected_disk_id"; then
         echo -e "${RED}Error: Failed to add disk to slot $selected_slot${NC}"
@@ -3141,23 +3134,36 @@ add_disk() {
     echo -e "${GREEN}Successfully added disk to slot $selected_slot${NC}"
     echo ""
 
-    if [ $reload_done -eq 1 ]; then
-        echo -e "${YELLOW}Module was reloaded, importing back rest of the disks.${NC}"
-        import_disks 1
-    fi
-
     # Show array status
     show_status
 
     echo ""
-    echo -e "${YELLOW}To complete adding the disk, you need to:${NC}"
-    echo -e "1. ${YELLOW}Start the array:${NC} ${GREEN}nmdctl start${NC}"
-    if [ "$selected_slot" -eq 0 ] || [ "$selected_slot" -eq 29 ]; then
-        echo -e "2. ${YELLOW}Reconstruct new parity: ${GREEN}nmdctl check${NC}"
+    if [ "$parity_swap" -eq 1 ]; then
+        echo -e "${YELLOW}You must next first ${RED}replace${YELLOW} the old parity disk into the unassigned data disk slot${NC}"
+        echo ""
+        echo -e "${YELLOW}Use: ${GREEN}nmdctl replace <unassigned data disk>${NC}"
+        echo ""
+    elif [ "${NMDSTAT_VALUES[mdState]}" = "SWAP_DSBL" ]; then
+        local parity_swap_slot=""
+        for slot in 0 29; do
+            if [ "${NMDSTAT_VALUES[rdevStatus.$slot]}" = "DISK_WRONG" ]; then
+                parity_swap_slot="$slot"
+                break
+            fi
+        done
+        echo -e "${YELLOW}You must now ${RED}manually copy${YELLOW} the contents from the old parity disk to the new parity disk!${NC}"
+        echo ""
+        echo -e "${YELLOW}Use: ${GREEN}( dd if=$selected_partition bs=1M status=progress ; dd if=/dev/zero bs=1M status=progress ) > /dev/${NMDSTAT_VALUES[rdevName.$parity_swap_slot]}${NC}"
+        echo ""
     else
-        echo -e "2. ${YELLOW}Clear the new data disk: ${GREEN}nmdctl check${NC}"
+        echo -e "${YELLOW}To complete adding the disk, you need to:${NC}"
+        echo -e "1. ${YELLOW}Start the array:${NC} ${GREEN}nmdctl start${NC}"
+        if [ "$selected_slot" -eq 0 ] || [ "$selected_slot" -eq 29 ]; then
+            echo -e "2. ${YELLOW}Reconstruct new parity: ${GREEN}nmdctl check${NC}"
+        else
+            echo -e "2. ${YELLOW}Clear the new data disk: ${GREEN}nmdctl check${NC}"
+        fi
     fi
-    echo -e "${YELLOW}Note: You cannot add another disk until this process completes.${NC}"
 
     return 0
 }

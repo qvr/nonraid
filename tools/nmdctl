@@ -2805,6 +2805,7 @@ create_array() {
 add_disk() {
     local replace_slot="${1}"
     local parity_swap=0
+    local preclear_done=0
     check_root
 
     # Check if module is loaded, will attempt to load if superblock provided
@@ -3111,6 +3112,20 @@ add_disk() {
     local verb="add"
     if [ -n "$replace_slot" ]; then
         verb="replace"
+    elif [ "$selected_slot" -ne 0 ] && [ "$selected_slot" -ne 29 ]; then
+        echo -e "${YELLOW}Note: If you have precleared the disk, you can optionally skip the clearing process done by the NonRAID driver${NC}"
+        echo -e "${RED}Warning:${YELLOW} If the disk has not been pre-cleared, skipping the clearing will lead to ${RED}array parity becoming invalid.${NC}"
+        echo ""
+        echo -e "${YELLOW}You can pre-clear the disk with: ${GREEN}dd if=/dev/zero of=$selected_partition bs=1M status=progress${NC}"
+        echo ""
+        read -r -p "Has the disk been pre-cleared? (y/N): " preclear
+        if [[ "$preclear" =~ ^[Yy]$ ]]; then
+            preclear_done=1
+            echo -e "${YELLOW}The disk will be marked as ${RED}pre-cleared.${NC}"
+        else
+            echo -e "${YELLOW}The disk will be cleared when the array is started.${NC}"
+        fi
+        echo ""
     fi
 
     # Confirm selection
@@ -3126,7 +3141,7 @@ add_disk() {
     echo -e "Adding disk to array..."
 
     # Import disk: slot, partition, offset, size, erased, id
-    if ! run_nmd_command "import $selected_slot $(basename "$selected_partition") 0 $selected_size_kb 0 $selected_disk_id"; then
+    if ! run_nmd_command "import $selected_slot $(basename "$selected_partition") 0 $selected_size_kb $preclear_done $selected_disk_id"; then
         echo -e "${RED}Error: Failed to add disk to slot $selected_slot${NC}"
         return 1
     fi

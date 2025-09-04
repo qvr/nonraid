@@ -216,7 +216,10 @@ sudo nmdctl add
 ```
 The disk does not need to be pre-cleared before running this command. Once the array is started after adding the new disk, the disk will not be taken into use until a clear operation is triggered with `nmdctl check`. The clearing operation does not affect parity - only the added new disk gets cleared and then taken into use.
 
-`nmdctl add` does not currently support skipping the clearing operation, as there is no reliable way to ensure the added disk is actually properly pre-cleared.
+If the disk has been pre-cleared (partition zeroed with `dd if=/dev/zero of=/dev/sdNEW1 bs=1M status=progress`), you can specify this during the interactive prompts, and the disk will be taken into use immediately when the array is started.
+
+> [!WARNING]
+> Marking a disk as pre-cleared when it has not actually been properly zeroed will lead to array parity becoming invalid, and a corrective parity check will be required to detect and fix the issue.
 
 ### Replace a disk (interactive)
 

@@ -203,14 +203,14 @@ sudo nmdctl start/stop
 
 ### Import all disks to the array without starting
 
-Useful if you want to add a new disk which needs to be done before starting the array.
+Useful if you want to add new disks, or other advanced operations which need to be done before starting the array normally.
 ```bash
 sudo nmdctl import
 ```
 
 ### Add a new disk (interactive)
 
-Disk must already be partitioned as with `create`, and the disk must not already be assigned to the array. Only one disk can be added at a time.
+Disk must already be partitioned as with `create`, and the disk must not already be assigned to the array.
 ```bash
 sudo nmdctl add
 ```
@@ -224,6 +224,15 @@ Replaces a disk in the specified already unassigned slot with a new disk. The ne
 ```bash
 sudo nmdctl replace SLOT
 ```
+
+> [!TIP]
+> A special "[Parity Swap](https://docs.unraid.net/legacy/FAQ/parity-swap-procedure/)" operation can be started by replacing an existing parity disk (slot 0 or 29) with a larger disk, and then using the existing parity disk as a replacement for an already unassigned data disk slot. The parity data will then need to be **manually copied** from the old parity disk to the new parity disk, and the rest of the new parity disk must be zeroed **before** starting the array.
+>
+> Copying can be done with `dd`, for example:
+> ```bash
+> ( dd if=/dev/sdOLD1 bs=1M status=progress ; dd if=/dev/zero bs=1M status=progress ) > /dev/sdNEW1
+> ```
+> Where `/dev/sdOLD1` is the old parity disk, and `/dev/sdNEW1` is the new parity disk. Make sure to use the correct device names!
 
 ### Unassign a disk from a slot
 

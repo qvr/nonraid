@@ -203,20 +203,23 @@ sudo nmdctl start/stop
 
 ### Import all disks to the array without starting
 
-Useful if you want to add a new disk which needs to be done before starting the array.
+Useful if you want to add new disks, or other advanced operations which need to be done before starting the array normally.
 ```bash
 sudo nmdctl import
 ```
 
 ### Add a new disk (interactive)
 
-Disk must already be partitioned as with `create`, and the disk must not already be assigned to the array. Only one disk can be added at a time.
+Disk must already be partitioned as with `create`, and the disk must not already be assigned to the array.
 ```bash
 sudo nmdctl add
 ```
 The disk does not need to be pre-cleared before running this command. Once the array is started after adding the new disk, the disk will not be taken into use until a clear operation is triggered with `nmdctl check`. The clearing operation does not affect parity - only the added new disk gets cleared and then taken into use.
 
-`nmdctl add` does not currently support skipping the clearing operation, as there is no reliable way to ensure the added disk is actually properly pre-cleared.
+If the disk has been pre-cleared (partition zeroed with `dd if=/dev/zero of=/dev/sdNEW1 bs=1M status=progress`), you can specify this during the interactive prompts, and the disk will be taken into use immediately when the array is started.
+
+> [!WARNING]
+> Marking a disk as pre-cleared when it has not actually been properly zeroed will lead to array parity becoming invalid, and a corrective parity check will be required to detect and fix the issue.
 
 ### Replace a disk (interactive)
 
@@ -224,6 +227,15 @@ Replaces a disk in the specified already unassigned slot with a new disk. The ne
 ```bash
 sudo nmdctl replace SLOT
 ```
+
+> [!TIP]
+> A special "[Parity Swap](https://docs.unraid.net/legacy/FAQ/parity-swap-procedure/)" operation can be started by replacing an existing parity disk (slot 0 or 29) with a larger disk, and then using the existing parity disk as a replacement for an already unassigned data disk slot. The parity data will then need to be **manually copied** from the old parity disk to the new parity disk, and the rest of the new parity disk must be zeroed **before** starting the array.
+>
+> Copying can be done with `dd`, for example:
+> ```bash
+> ( dd if=/dev/sdOLD1 bs=1M status=progress ; dd if=/dev/zero bs=1M status=progress ) > /dev/sdNEW1
+> ```
+> Where `/dev/sdOLD1` is the old parity disk, and `/dev/sdNEW1` is the new parity disk. Make sure to use the correct device names!
 
 ### Unassign a disk from a slot
 

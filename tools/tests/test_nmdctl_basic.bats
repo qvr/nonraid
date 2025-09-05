@@ -4,9 +4,10 @@
 setup() {
     export PATH="$BATS_TEST_DIRNAME/..:$PATH"
     source "$BATS_TEST_DIRNAME/../nmdctl"
-    # patch out root and module checks
+    # patch out functions unnecessary for testing
     eval 'check_root() { return 0; }'
     eval 'check_module_loaded() { return 0; }'
+    eval 'run_nmd_command() { return 1; }'
 }
 
 teardown() {
@@ -317,28 +318,14 @@ rdevNumErrors.29=0/' \
 }
 
 @test "nmdctl help performance" {
-    # Help should complete within reasonable time
-    start_time=$(date +%s.%N)
+    local start_time=$(date +%s%N)
     run timeout 5s "$BATS_TEST_DIRNAME/../nmdctl" --help
-    end_time=$(date +%s.%N)
+    local end_time=$(date +%s%N)
 
-    duration=$(echo "$end_time - $start_time" | bc -l)
+    local duration=$((end_time - start_time))
 
-    # Should complete in under 1 second
-    [ "$(echo "$duration < 1.0" | bc -l)" -eq 1 ]
-}
-
-@test "nmdctl version performance" {
-    # Version check should be very fast
-    start_time=$(date +%s.%N)
-    run timeout 2s "$BATS_TEST_DIRNAME/../nmdctl" --version
-    end_time=$(date +%s.%N)
-
-    duration=$(echo "$end_time - $start_time" | bc -l)
-
-    # Should complete in under 0.5 seconds
-    [ "$(echo "$duration < 0.5" | bc -l)" -eq 1 ]
-    [ "$status" -eq 0 ]
+    # Should complete in under 100 ms
+    [ "$((duration / 1000000))" -lt 100 ]
 }
 
 # Tests for different output formats

@@ -2368,6 +2368,13 @@ stop_array() {
         return 1
     fi
 
+    if [ "$UNATTENDED" -eq 0 ]; then
+        # Reload driver to clear any stale state
+        if ! reload_module 1; then
+            echo -e "${YELLOW}Warning: Failed to reload NonRAID kernel module${NC}"
+        fi
+    fi
+
     echo -e "${GREEN}Array stopped successfully${NC}"
     return 0
 }

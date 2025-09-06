@@ -60,6 +60,8 @@ jobs:
           cp systemd/nonraid.default debian/nonraid-tools.nonraid.default
           cp systemd/nonraid-parity-check.service debian/nonraid-tools.nonraid-parity-check.service
           cp systemd/nonraid-parity-check.timer debian/nonraid-tools.nonraid-parity-check.timer
+          cp systemd/nonraid-notify.service debian/nonraid-tools.nonraid-notify.service
+          cp systemd/nonraid-notify.timer debian/nonraid-tools.nonraid-notify.timer
           echo "::endgroup::"
 
           echo "::group::Build Debian Binary Package"
@@ -139,6 +141,7 @@ jobs:
             - `nonraid.service` systemd unit file
             - `/etc/default/nonraid` systemd unit configuration file
             - `nonraid-parity-check.service + .timer` systemd timer and service files for scheduled parity checks
+            - `nonraid-notify.service + .timer` systemd timer and service files for status notifications
 
             ## Changes Since Last Release
             ${{ steps.get-commits.outputs.commits }}

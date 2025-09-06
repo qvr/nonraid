@@ -63,7 +63,7 @@ Status and monitoring command:
     status [OPTIONS]                Show current array status
         -v, --verbose               Show detailed status information
         --no-fs                     Don't show filesystem information
-        -o, --output FORMAT         Output format: default, prometheus, json
+        -o, --output FORMAT         Output format: default, prometheus, json, terse
         -m, --monitor [INTERVAL]    Monitor mode: refresh status every INTERVAL seconds (default: $MONITOR_INTERVAL)
 
 Array Management Commands:
@@ -1348,6 +1348,16 @@ format_json_output() {
     echo "}"
 }
 
+format_terse_output() {
+    local mdstate="${ARRAY_STATUS_DATA[mdstate]}"
+    local health_status="${ARRAY_STATUS_DATA[health_status]}"
+    local health_details="${ARRAY_STATUS_DATA[health_details]}"
+
+    [ -n "$health_details" ] && health_status="$health_status ($health_details)"
+
+    echo "NonRAID Array State: $(format_array_state "$mdstate"), Health: $health_status"
+}
+
 # Get visible length of a string with ANSI escape codes
 get_visible_length() {
     local str="$1"
@@ -1431,6 +1441,9 @@ format_output() {
             ;;
         "json")
             format_json_output
+            ;;
+        "terse")
+            format_terse_output
             ;;
         *)
             echo "Error: Unknown output format: $output_format" >&2
@@ -1718,14 +1731,15 @@ show_status() {
 
     # Validate output format
     case "$output_format" in
-        "default"|"prometheus"|"prom"|"json")
+        "default"|"prometheus"|"prom"|"json"|"terse")
             # Accept prom alias
             [[ "$output_format" == "prom" ]] && output_format="prometheus"
-            # Skip getting fs info for prometheus output
+            # Skip getting fs info for prometheus and terse output
             [[ "$output_format" == "prometheus" ]] && NO_FS=1
+            [[ "$output_format" == "terse" ]] && NO_FS=1
             ;;
         *)
-            echo -e "${RED}Error: Invalid output format '$output_format'. Valid formats: default, prometheus, json${NC}"
+            echo -e "${RED}Error: Invalid output format '$output_format'. Valid formats: default, prometheus, json, terse${NC}"
             return 1
             ;;
     esac

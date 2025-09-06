@@ -3364,7 +3364,9 @@ reload_module() {
         local current_superblock=$(get_nmdstat_value "sbName")
         if [ -n "$current_superblock" ] && [ "$current_superblock" != "(null)" ]; then
             superblock="$current_superblock"
-            echo -e "Using current superblock from running module: ${GREEN}$superblock${NC}"
+            if [ "$quiet_mode" -eq 0 ]; then
+                echo -e "Using current superblock from running module: ${GREEN}$superblock${NC}"
+            fi
         else
             superblock="$DEFAULT_SUPERBLOCK"
         fi

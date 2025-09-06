@@ -35,7 +35,7 @@ jobs:
       - name: Get Next Build Number
         id: get-build
         run: |
-          NEXT_BUILD=$(git tag -l "nonraid-tools-${{ steps.get-nmdctl.outputs.version }}-*" | wc -l)
+          NEXT_BUILD=$(git tag -l "nonraid-tools-${{ steps.get-nmdctl.outputs.version }}" | wc -l)
           NEXT_BUILD=$((NEXT_BUILD + 1))
           echo "build=$NEXT_BUILD" >> $GITHUB_OUTPUT
 
@@ -90,7 +90,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Publish to PPA
-        if: ${{ github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event.inputs.create_release == 'true' && steps.get-build.outputs.build == '1' }}
         env:
           PPA_GPG_KEY: ${{ secrets.PPA_GPG_KEY }}
           PPA_GPG_PASSPHRASE: ${{ secrets.PPA_GPG_PASSPHRASE }}
@@ -118,25 +118,27 @@ jobs:
           echo "::endgroup::"
 
       - name: Create Release
-        if: ${{ github.event.inputs.create_release == 'true' }}
+        if: ${{ github.event.inputs.create_release == 'true' && steps.get-build.outputs.build == '1' }}
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.event.inputs.draft_release != 'true' && format('nonraid-tools-{0}-{1}', steps.get-nmdctl.outputs.version, steps.get-build.outputs.build) || '' }}
-          name: NonRAID Tools Debian Package - Version ${{ steps.get-nmdctl.outputs.version }} Build ${{ steps.get-build.outputs.build }}
+          tag_name: ${{ github.event.inputs.draft_release != 'true' && format('nonraid-tools-{0}', steps.get-nmdctl.outputs.version) || '' }}
+          name: NonRAID Tools Debian Package - Version ${{ steps.get-nmdctl.outputs.version }}
           draft: ${{ github.event.inputs.draft_release }}
           body: |
-            **NonRAID Tools Package - Version ${{ steps.get-nmdctl.outputs.version }} Build ${{ steps.get-build.outputs.build }}**
+            **NonRAID Tools Package - Version ${{ steps.get-nmdctl.outputs.version }}**
 
             This release contains the NonRAID array management tools package for Ubuntu/Debian systems.
             ${{ github.event.inputs.draft_release == 'true' && format('
             > ⚠️ **DRAFT RELEASE** - This is a draft release without an associated Git tag. Finalize this release before tagging as:
-            > `nonraid-tools-{0}-{1}`', steps.get-nmdctl.outputs.version, steps.get-build.outputs.build) || '' }}
+            > `nonraid-tools-{0}`', steps.get-nmdctl.outputs.version) || '' }}
 
             ## What's Included
-            - `/usr/bin/nmdctl`
+            - `/usr/bin/nmdctl` NonRAID array management command line tool
             - `nonraid.service` systemd unit file
+            - `/etc/default/nonraid` systemd unit configuration file
+            - `nonraid-parity-check.service + .timer` systemd timer and service files for scheduled parity checks
 
             ## Changes Since Last Release
             ${{ steps.get-commits.outputs.commits }}

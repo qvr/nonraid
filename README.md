@@ -163,11 +163,16 @@ sudo nmdctl [--no-color] status [--verbose] [--no-fs] [-o OUTPUT] [--monitor [IN
 Options:
 - `--verbose` - Show detailed status information including drive IDs
 - `--no-fs` - Skip displaying filesystem information (slightly faster)
-- `-o, --output FORMAT` - Specify output format: `default`, `prometheus`, or `json`
+- `-o, --output FORMAT` - Specify output format: `default`, `prometheus`, `json`, or `terse`
 - `--monitor [INTERVAL]` - Enable monitor mode, refreshing every INTERVAL seconds (default: 2)
 - `--no-color` (global option) - Disable colored output, suitable for cron emails
 
 Exits with an error code if there are any issues with the array, so this can also be used as a simple array monitoring in a cronjob.
+
+> [!TIP]
+> NonRAID includes a systemd timer and service ([nonraid-notify.service](tools/systemd/nonraid-notify.service)) that uses the terse format to send alert notifications if the array health becomes degraded. Configure it by setting `NONRAID_NOTIFY_CMD` in [/etc/default/nonraid](tools/systemd/nonraid.default).
+>
+> Any command that accepts the notification message from standard input (pipe) will work, but [Apprise](https://github.com/caronc/apprise) is a great cli tool for sending push notifications to numerous services (Discord, Pushover, email, etc).
 
 ### Create a new array (interactive)
 

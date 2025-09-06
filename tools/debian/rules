@@ -8,6 +8,12 @@ override_dh_installsystemd:
 	dh_installsystemd --name=nonraid --no-stop-on-upgrade --no-start
 	dh_installsystemd --name=nonraid-parity-check --no-stop-on-upgrade --no-start --no-enable nonraid-parity-check.service
 	dh_installsystemd --name=nonraid-parity-check nonraid-parity-check.timer
+	dh_installsystemd --name=nonraid-notify --no-stop-on-upgrade --no-start --no-enable nonraid-notify.service
+	dh_installsystemd --name=nonraid-notify nonraid-notify.timer
 
 override_dh_installinit:
 	dh_installinit -n --name nonraid
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 600 debian/nonraid-tools/etc/default/nonraid

@@ -593,9 +593,9 @@ static mddev_t *alloc_mddev(dev_t dev)
 	mutex_init(&mddev->recovery_sem);
 
 	/* create our recovery thread */
-	mddev->recovery_thread = md_register_thread(md_do_recovery, mddev, 0, "mdrecoveryd");
+	mddev->recovery_thread = md_register_thread(md_do_recovery, mddev, 0, "nmdrecoveryd");
 	if (!mddev->recovery_thread) {
-		printk("nmd: bug: couldn't allocate mdrecoveryd\n");
+		printk("nmd: bug: couldn't allocate nmdrecoveryd\n");
 		free_mddev(mddev);
 		return NULL;
 	}

@@ -3436,9 +3436,6 @@ reload_module() {
         return 1
     fi
 
-    # Small delay to ensure module is fully unloaded
-    sleep 1
-
     # Load module with specified superblock
     if [ "$quiet_mode" -eq 0 ]; then
         echo "Loading nonraid module with superblock: $superblock"

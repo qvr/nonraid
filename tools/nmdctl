@@ -575,11 +575,12 @@ collect_array_health() {
         [ "$mdnumdisabled" -gt 0 ] && issues="${issues}Disabled: $mdnumdisabled, "
         [ "$mdnumreplaced" -gt 0 ] && issues="${issues}Replaced: $mdnumreplaced, "
         [ "$sbsyncerrs" -gt 0 ] && issues="${issues}Sync Errors: $sbsyncerrs, "
+        [ "$disks_num_errors" -gt 0 ] && issues="${issues}I/O Errors: $disks_num_errors, "
         health_details=${issues%, }
         health_code=1
     elif [ "$disks_num_errors" -gt 0 ]; then
         health_status="WARNING"
-        health_details="All disks present, but some have read or write errors ($disks_num_errors total)"
+        health_details="All disks present, but some have I/O errors ($disks_num_errors total)"
         health_code=1
     elif [ "$mdstate" = "STOPPED" ]; then
         health_status="READY"

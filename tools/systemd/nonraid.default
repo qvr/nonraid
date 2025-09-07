@@ -21,3 +21,17 @@
 #   - Set turbo write mode: STARTUP_SETTINGS="md_write_method 1"
 #   - Multiple settings: STARTUP_SETTINGS="md_write_method 1, md_trace 2"
 #STARTUP_SETTINGS=""
+
+# Notification command for array status alerts
+# This command will receive array status output via stdin if started array becomes degraded
+# The nonraid-notify.service uses this to send notifications
+# Default: empty (no notifications are sent)
+# Examples:
+#   - Send email: NONRAID_NOTIFY_CMD="mail -s 'NonRAID Status Alert' admin@example.com"
+#   - Use apprise with many notification services: NONRAID_NOTIFY_CMD="apprise -t 'NonRAID Status Alert' discord://webhook_id/webhook_token"
+#NONRAID_NOTIFY_CMD=""
+
+# nmdctl output format to use for notifications
+# Options: default, prometheus, json, terse
+# Default: terse (one-line summary of array status)
+#NONRAID_NOTIFY_FORMAT="terse"

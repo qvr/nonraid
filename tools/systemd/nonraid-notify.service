@@ -1,0 +1,36 @@
+[Unit]
+Description=NonRAID status notifier
+Requires=nonraid.service
+After=nonraid.service
+
+[Service]
+Type=oneshot
+Environment="NONRAID_NOTIFY_FORMAT=terse"
+Environment="NONRAID_NOTIFY_CMD="
+EnvironmentFile=-/etc/default/nonraid
+StateDirectory=nonraid
+ExecStart=-/bin/bash -c '\
+  if [ -n "$NONRAID_NOTIFY_CMD" ]; then \
+    STATE="$STATE_DIRECTORY/notified.state"; \
+    OUTPUT=$(nmdctl --no-color status -o $NONRAID_NOTIFY_FORMAT 2>&1); \
+    EXIT_CODE=$?; \
+    ARRAY_STARTED=$(grep -q "mdState=STARTED" /proc/nmdstat && echo "true" || echo "false"); \
+    if [ $EXIT_CODE -ne 0 ] && [ "$ARRAY_STARTED" = "true" ]; then \
+      SHOULD_NOTIFY=false; \
+      if [ ! -f "$STATE" ]; then \
+        SHOULD_NOTIFY=true; \
+      elif [ $(find "$STATE" -mtime +0 -print 2>/dev/null | wc -l) -gt 0 ]; then \
+        SHOULD_NOTIFY=true; \
+      fi; \
+      if [ "$SHOULD_NOTIFY" = "true" ]; then \
+        echo "$OUTPUT" | tee "$STATE" | bash -c "$NONRAID_NOTIFY_CMD"; \
+      fi; \
+    else \
+      if [ -f "$STATE" ] && [ $EXIT_CODE -eq 0 ]; then \
+        echo "$OUTPUT" | bash -c "$NONRAID_NOTIFY_CMD"; \
+        rm -f "$STATE"; \
+      fi; \
+    fi; \
+  else \
+    echo "No notification command configured in /etc/default/nonraid, skipping status check"; \
+  fi'

@@ -1,0 +1,10 @@
+[Unit]
+Description=NonRAID status notifier timer
+
+[Timer]
+OnBootSec=15m
+OnUnitActiveSec=15m
+Unit=nonraid-notify.service
+
+[Install]
+WantedBy=timers.target

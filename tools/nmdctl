@@ -2094,9 +2094,9 @@ import_disks() {
             continue
         fi
 
-        # Check if this slot has been intentionally disabled (DISK_NP_MISSING status)
+        # Check if this slot has been intentionally disabled (DISK_NP_MISSING or DISK_NP_DSBL status)
         local rdevstatus=$(get_nmdstat_value "rdevStatus.$slot")
-        if [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ -z "$disk_id" ]; then
+        if [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ] || [ -z "$disk_id" ]; then
             echo -e "${YELLOW}Skipping slot $slot: Disk has been unassigned (status: $rdevstatus)${NC}"
             continue
         fi

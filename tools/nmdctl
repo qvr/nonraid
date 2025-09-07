@@ -1633,6 +1633,7 @@ monitor_status_loop() {
 
     # Initial screen clear
     printf '\e[2J\e[H'
+    update_status_bar " NonRAID Array Status Monitor - loading..." "$HEADER_BG"
 
     while true; do
         get_all_nmdstat_values NMDSTAT_VALUES

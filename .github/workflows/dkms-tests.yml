@@ -22,14 +22,16 @@ jobs:
   dkms-build-test:
     runs-on: ubuntu-latest
     name: DKMS Build Test ${{ matrix.container.name }}
+    continue-on-error: ${{ matrix.container.experimental }}
 
     strategy:
       matrix:
         container:
-          - { name: "Debian 12", image: "debian:12", headers: "linux-headers-amd64" }
-          - { name: "Debian 13", image: "debian:13", headers: "linux-headers-amd64" }
-          - { name: "Ubuntu 24.04", image: "ubuntu:24.04", headers: "linux-headers-generic" }
-          - { name: "Ubuntu 24.04 HWE", image: "ubuntu:24.04", headers: "linux-headers-generic-hwe-24.04" }
+          - { name: "Debian 12", image: "debian:12", headers: "linux-headers-amd64", pkg_mgr: "apt", experimental: false }
+          - { name: "Debian 13", image: "debian:13", headers: "linux-headers-amd64", pkg_mgr: "apt", experimental: false }
+          - { name: "Ubuntu 24.04", image: "ubuntu:24.04", headers: "linux-headers-generic", pkg_mgr: "apt", experimental: false }
+          - { name: "Ubuntu 24.04 HWE", image: "ubuntu:24.04", headers: "linux-headers-generic-hwe-24.04", pkg_mgr: "apt", experimental: false }
+          - { name: "Arch Linux", image: "archlinux:latest", headers: "linux-headers", pkg_mgr: "pacman", experimental: true }
       fail-fast: false
 
     container: ${{ matrix.container.image }}
@@ -37,9 +39,14 @@ jobs:
     steps:
       - name: Install base dependencies
         run: |
-          export DEBIAN_FRONTEND=noninteractive
-          apt-get update
-          apt-get install -y git build-essential dkms
+          if [ "${{ matrix.container.pkg_mgr }}" = "apt" ]; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y git build-essential dkms
+          elif [ "${{ matrix.container.pkg_mgr }}" = "pacman" ]; then
+            pacman -Syu --noconfirm
+            pacman -S --noconfirm git base-devel dkms
+          fi
 
       - uses: actions/checkout@v4
 
@@ -51,15 +58,26 @@ jobs:
 
       - name: Install kernel headers
         run: |
-          export DEBIAN_FRONTEND=noninteractive
-          # Install the latest available kernel headers
-          apt-get install -y ${{ matrix.container.headers }}
+          if [ "${{ matrix.container.pkg_mgr }}" = "apt" ]; then
+            export DEBIAN_FRONTEND=noninteractive
+            # Install the latest available kernel headers
+            apt-get install -y ${{ matrix.container.headers }}
 
-          # Verify headers are installed
-          KVERSION=$(ls /lib/modules/ | head -n1)
-          echo "Using kernel version: $KVERSION"
-          ls -la /lib/modules/$KVERSION/build/ || echo "Build symlink not found"
-          ls -la /usr/src/linux-headers-* || echo "No headers found in /usr/src"
+            # Verify headers are installed
+            KVERSION=$(ls /lib/modules/ | head -n1)
+            echo "Using kernel version: $KVERSION"
+            ls -la /lib/modules/$KVERSION/build/ || echo "Build symlink not found"
+            ls -la /usr/src/linux-headers-* || echo "No headers found in /usr/src"
+          elif [ "${{ matrix.container.pkg_mgr }}" = "pacman" ]; then
+            # Install the latest available kernel headers
+            pacman -S --noconfirm ${{ matrix.container.headers }}
+
+            # Verify headers are installed
+            KVERSION=$(ls /lib/modules/ | head -n1)
+            echo "Using kernel version: $KVERSION"
+            ls -la /lib/modules/$KVERSION/build/ || echo "Build symlink not found"
+            ls -la /usr/src/linux-* || echo "No headers found in /usr/src"
+          fi
 
       - name: Prepare DKMS source
         run: |

@@ -60,7 +60,7 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 | ------------- | --------------------- | ------------- | -------------- | ------ |
 | 6.1 - 6.4 | [nonraid-6.1](https://github.com/qvr/nonraid/tree/nonraid-6.1) | unRAID 6.12.15 (6.1.126-Unraid) | Debian 12 | Contains fixes backported from 6.6 branch |
 | 6.5 - 6.8 | [nonraid-6.6](https://github.com/qvr/nonraid/tree/nonraid-6.6) | unRAID 7.0.1 (6.6.78-Unraid) | Ubuntu 24.04 LTS GA kernel | No functional difference to 6.12 branch |
-| 6.11 - 6.14 | [nonraid-6.12](https://github.com/qvr/nonraid/tree/nonraid-6.12) | unRAID 7.1.2 (6.12.24-Unraid) | Ubuntu 24.04 LTS HWE kernel, Debian 13 | |
+| 6.11 - 6.16 | [nonraid-6.12](https://github.com/qvr/nonraid/tree/nonraid-6.12) | unRAID 7.1.2 (6.12.24-Unraid) | Ubuntu 24.04 LTS HWE kernel, Debian 13 | |
 
 The supported kernel version ranges might be inaccurate, the driver has been tested to work on **Ubuntu 24.04 LTS** GA kernel (6.8.0) and HWE kernels (6.11 and 6.14), on **Debian 12** (6.1) and on **Debian 13** (6.12). Note that kernel versions 6.9 and 6.10 are not supported. You can report other distributions and kernel versions that work in the [discussions](https://github.com/qvr/nonraid/discussions).
 
@@ -120,6 +120,65 @@ sudo apt install ./nonraid-dkms_*.deb ./nonraid-tools_*.deb
 
 ### Option 3: Fully manual installation from repository source
 For other distributions, or if you want to build the DKMS module manually, you can clone the repository and build the DKMS module from source, and copy the management tool from [tools/nmdctl](tools/nmdctl).
+
+<details>
+<summary>Manual DKMS installation steps</summary>
+
+#### Prerequisites
+Make sure you have git, build tools (gcc, make, etc.), DKMS, and kernel headers for your running kernel installed.
+
+#### Installation Steps
+
+1. **Clone the repository:**
+```bash
+git clone https://github.com/qvr/nonraid.git
+cd nonraid
+```
+
+2. **Get the current NonRAID DKMS module version:**
+```bash
+DKMS_VERSION=$(grep "^PACKAGE_VERSION=" dkms.conf | cut -d= -f2)
+echo "DKMS version: $DKMS_VERSION"
+```
+
+3. **Copy sources to DKMS source directory:**
+```bash
+DKMS_SRC_DIR="/usr/src/nonraid-dkms-$DKMS_VERSION"
+sudo mkdir -p "$DKMS_SRC_DIR"
+sudo cp -r md_nonraid/ raid6/ dkms.conf Makefile "$DKMS_SRC_DIR/"
+```
+
+4. **Build and install the module:**
+```bash
+KVERSION=$(uname -r)
+sudo dkms install nonraid-dkms/$DKMS_VERSION -k "$KVERSION"
+```
+
+5. **Install the management tool:**
+```bash
+sudo cp tools/nmdctl /usr/local/bin/nmdctl
+sudo chmod +x /usr/local/bin/nmdctl
+# You might also want to copy the systemd services/timers and default config
+# from tools/systemd/
+```
+
+6. **Verify installation:**
+```bash
+sudo dkms status
+# Should show: nonraid-dkms/$DKMS_VERSION, $KVERSION, $(uname -m): installed
+
+# Test the management tool
+sudo nmdctl --help
+```
+
+#### Troubleshooting
+
+If the build fails, check:
+- Kernel headers are properly installed: `ls /lib/modules/$(uname -r)/build/`
+- DKMS log files: `sudo dkms status -v` and `/var/lib/dkms/nonraid-dkms/$DKMS_VERSION/build/make.log`
+- Your kernel version is supported (see [Kernel support matrix](#kernel-support-matrix))
+
+</details>
 
 ### Post-installation steps
 

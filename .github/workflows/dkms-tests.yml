@@ -22,15 +22,16 @@ jobs:
   dkms-build-test:
     runs-on: ubuntu-latest
     name: DKMS Build Test ${{ matrix.container.name }}
+    continue-on-error: ${{ matrix.container.experimental }}
 
     strategy:
       matrix:
         container:
-          - { name: "Debian 12", image: "debian:12", headers: "linux-headers-amd64", pkg_mgr: "apt" }
-          - { name: "Debian 13", image: "debian:13", headers: "linux-headers-amd64", pkg_mgr: "apt" }
-          - { name: "Ubuntu 24.04", image: "ubuntu:24.04", headers: "linux-headers-generic", pkg_mgr: "apt" }
-          - { name: "Ubuntu 24.04 HWE", image: "ubuntu:24.04", headers: "linux-headers-generic-hwe-24.04", pkg_mgr: "apt" }
-          - { name: "Arch Linux", image: "archlinux:latest", headers: "linux-headers", pkg_mgr: "pacman" }
+          - { name: "Debian 12", image: "debian:12", headers: "linux-headers-amd64", pkg_mgr: "apt", experimental: false }
+          - { name: "Debian 13", image: "debian:13", headers: "linux-headers-amd64", pkg_mgr: "apt", experimental: false }
+          - { name: "Ubuntu 24.04", image: "ubuntu:24.04", headers: "linux-headers-generic", pkg_mgr: "apt", experimental: false }
+          - { name: "Ubuntu 24.04 HWE", image: "ubuntu:24.04", headers: "linux-headers-generic-hwe-24.04", pkg_mgr: "apt", experimental: false }
+          - { name: "Arch Linux", image: "archlinux:latest", headers: "linux-headers", pkg_mgr: "pacman", experimental: true }
       fail-fast: false
 
     container: ${{ matrix.container.image }}

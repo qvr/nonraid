@@ -984,10 +984,8 @@ format_human_disk_status() {
         headers+=("Disk Name" "FS" "Mountpoint" "Usage")
         widths+=(9 2 10 5)
 
-        if [ "$MONITOR_MODE" -eq 1 ]; then
-            headers+=("Read(MB/s)" "Write(MB/s)")
-            widths+=(10 11)
-        fi
+        headers+=("Reads" "Writes")
+        widths+=(5 6)
     fi
 
     if [ "$VERBOSE" -eq 1 ]; then
@@ -1024,13 +1022,11 @@ format_human_disk_status() {
             local usage_len=${#usage}
             [ "$usage_len" -gt "${widths[7]}" ] && widths[7]=$usage_len
 
-            if [ "$MONITOR_MODE" -eq 1 ]; then
-                local read_len=${#read_rate}
-                [ "$read_len" -gt "${widths[8]}" ] && widths[8]=$read_len
+            local read_len=$(get_visible_length "$read_rate")
+            [ "$read_len" -gt "${widths[8]}" ] && widths[8]=$read_len
 
-                local write_len=${#write_rate}
-                [ "$write_len" -gt "${widths[9]}" ] && widths[9]=$write_len
-            fi
+            local write_len=$(get_visible_length "$write_rate")
+            [ "$write_len" -gt "${widths[9]}" ] && widths[9]=$write_len
         fi
 
         if [ "$VERBOSE" -eq 1 ]; then
@@ -1090,10 +1086,13 @@ format_disk_entry_line() {
         printf "  %-*s" "${widths[6]}" "$mountpoint"
         printf "  %-*s" "${widths[7]}" "$usage"
 
-        if [ "$MONITOR_MODE" -eq 1 ]; then
-            printf "  %-*s" "${widths[8]}" "$read_rate"
-            printf "  %-*s" "${widths[9]}" "$write_rate"
-        fi
+        local read_visible_length=$(get_visible_length "$read_rate")
+        printf "  %s" "$read_rate"
+        printf "%*s" "$((widths[8] - read_visible_length))" ""
+
+        local write_visible_length=$(get_visible_length "$write_rate")
+        printf "  %s" "$write_rate"
+        printf "%*s" "$((widths[9] - write_visible_length))" ""
     fi
 
     if [ "$VERBOSE" -eq 1 ]; then
@@ -1432,9 +1431,9 @@ format_disk_entry_data() {
         fs_type="$slottype"
     fi
 
-    if [ "$MONITOR_MODE" -eq 1 ] && [ "$array_started" = "true" ]; then
-        read_rate=$(format_io_rate "${DISK_STATUS_DATA[slot_${idx}_read_rate_scaled]:-0}")
-        write_rate=$(format_io_rate "${DISK_STATUS_DATA[slot_${idx}_write_rate_scaled]:-0}")
+    if [ "$array_started" = "true" ]; then
+        read_rate=$(format_rate_or_count "${DISK_STATUS_DATA[slot_${idx}_read_rate_scaled]:-0}" "slot_${idx}_reads")
+        write_rate=$(format_rate_or_count "${DISK_STATUS_DATA[slot_${idx}_write_rate_scaled]:-0}" "slot_${idx}_writes")
     fi
 
     echo "$idx|$slot_display|$status_formatted|$rdevname|$size_display|$diskname_display|$fs_type|$mountpoint|$usage|$read_rate|$write_rate|$diskid"
@@ -1571,6 +1570,17 @@ calculate_disk_io_rates() {
     DISK_STATUS_DATA["timestamp_prev"]="$current_timestamp"
 }
 
+format_rate_or_count() {
+    local rate_scaled="$1"
+    local count_key="$2"
+
+    if [ "$MONITOR_MODE" -eq 1 ] && [ "$rate_scaled" -gt 0 ]; then
+        format_io_rate "$rate_scaled"
+    else
+        format_io_count "${DISK_STATUS_DATA[$count_key]:-0}"
+    fi
+}
+
 format_io_rate() {
     # Input is scaled by 100 (e.g., 250 = 2.50 MB/s)
     # Convert scaled value back to MB/s with 2 decimals
@@ -1580,9 +1590,58 @@ format_io_rate() {
         local rate_int=$((rate_scaled / 100))
         local rate_decimal=$((rate_scaled % 100))
 
-        printf "%d.%02d" "$rate_int" "$rate_decimal"
+        printf "${GREEN}%d.%02d MB/s${NC}" "$rate_int" "$rate_decimal"
     else
         echo -n "-"
+    fi
+}
+
+format_io_count() {
+    # Format 4kB block counts as bytes with appropriate suffixes (B, kB, MB, GB, TB)
+    local count="$1"
+
+    if [ "$count" -eq 0 ]; then
+        echo -n "-"
+        return
+    fi
+
+    # Convert 4kB blocks to bytes
+    local bytes=$((count * 4096))
+
+    if [ "$bytes" -lt 1024 ]; then
+        printf "%dB" "$bytes"
+    elif [ "$bytes" -lt 1048576 ]; then  # 1024^2
+        local kb=$((bytes / 1024))
+        local remainder=$((bytes % 1024))
+        if [ "$remainder" -ge 102 ]; then  # Show decimal if > 0.1kB
+            printf "%d.%dkB" "$kb" $((remainder * 10 / 1024))
+        else
+            printf "%dkB" "$kb"
+        fi
+    elif [ "$bytes" -lt 1073741824 ]; then  # 1024^3
+        local mb=$((bytes / 1048576))
+        local remainder=$((bytes % 1048576))
+        if [ "$remainder" -ge 104857 ]; then  # Show decimal if > 0.1MB
+            printf "%d.%dMB" "$mb" $((remainder * 10 / 1048576))
+        else
+            printf "%dMB" "$mb"
+        fi
+    elif [ "$bytes" -lt 1099511627776 ]; then  # 1024^4
+        local gb=$((bytes / 1073741824))
+        local remainder=$((bytes % 1073741824))
+        if [ "$remainder" -ge 107374182 ]; then  # Show decimal if > 0.1GB
+            printf "%d.%dGB" "$gb" $((remainder * 10 / 1073741824))
+        else
+            printf "%dGB" "$gb"
+        fi
+    else
+        local tb=$((bytes / 1099511627776))
+        local remainder=$((bytes % 1099511627776))
+        if [ "$remainder" -ge 109951162777 ]; then  # Show decimal if > 0.1TB
+            printf "%d.%dTB" "$tb" $((remainder * 10 / 1099511627776))
+        else
+            printf "%dTB" "$tb"
+        fi
     fi
 }
 

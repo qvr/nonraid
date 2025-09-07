@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.16.0
+VERSION=1.16.1
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -333,6 +333,27 @@ format_available_devices() {
     echo ""
 }
 
+# Format health status with appropriate colors
+format_health_status() {
+    local health_status="$1"
+    local health_formatted=""
+
+    case "$health_status" in
+        "ERROR") health_formatted="${RED}ERROR${NC}" ;;
+        "NEW") health_formatted="${BLUE}NEW${NC}" ;;
+        "NEW_DISK") health_formatted="${BLUE}NEW_DISK${NC}" ;;
+        "OFFLINE") health_formatted="${RED}OFFLINE${NC}" ;;
+        "PARTIAL") health_formatted="${YELLOW}PARTIAL${NC}" ;;
+        "DEGRADED") health_formatted="${YELLOW}DEGRADED${NC}" ;;
+        "WARNING") health_formatted="${YELLOW}WARNING${NC}" ;;
+        "READY") health_formatted="${YELLOW}READY${NC}" ;;
+        "HEALTHY") health_formatted="${GREEN}HEALTHY${NC}" ;;
+        *) health_formatted="$health_status" ;;
+    esac
+
+    echo -e "$health_formatted"
+}
+
 # Check if the nonraid driver is in an inconsistent state
 # Returns 0 if inconsistent, 1 if consistent
 check_driver_inconsistent_state() {
@@ -575,11 +596,12 @@ collect_array_health() {
         [ "$mdnumdisabled" -gt 0 ] && issues="${issues}Disabled: $mdnumdisabled, "
         [ "$mdnumreplaced" -gt 0 ] && issues="${issues}Replaced: $mdnumreplaced, "
         [ "$sbsyncerrs" -gt 0 ] && issues="${issues}Sync Errors: $sbsyncerrs, "
+        [ "$disks_num_errors" -gt 0 ] && issues="${issues}I/O Errors: $disks_num_errors, "
         health_details=${issues%, }
         health_code=1
     elif [ "$disks_num_errors" -gt 0 ]; then
         health_status="WARNING"
-        health_details="All disks present, but some have read or write errors ($disks_num_errors total)"
+        health_details="All disks present, but some have I/O errors ($disks_num_errors total)"
         health_code=1
     elif [ "$mdstate" = "STOPPED" ]; then
         health_status="READY"
@@ -856,19 +878,7 @@ format_human_output() {
     local health_details="${ARRAY_STATUS_DATA[health_details]}"
     local last_sync_human="${ARRAY_STATUS_DATA[last_sync_human]}"
 
-    local health_formatted=""
-    case "$health_status" in
-        "ERROR") health_formatted="${RED}ERROR${NC}" ;;
-        "NEW") health_formatted="${BLUE}NEW${NC}" ;;
-        "NEW_DISK") health_formatted="${BLUE}NEW_DISK${NC}" ;;
-        "OFFLINE") health_formatted="${RED}OFFLINE${NC}" ;;
-        "PARTIAL") health_formatted="${YELLOW}PARTIAL${NC}" ;;
-        "DEGRADED") health_formatted="${YELLOW}DEGRADED${NC}" ;;
-        "WARNING") health_formatted="${YELLOW}WARNING${NC}" ;;
-        "READY") health_formatted="${YELLOW}READY${NC}" ;;
-        "HEALTHY") health_formatted="${GREEN}HEALTHY${NC}" ;;
-        *) health_formatted="$health_status" ;;
-    esac
+    local health_formatted="$(format_health_status "$health_status")"
 
     echo -n -e "Array Health  : $health_formatted"
     if [ -n "$health_details" ]; then
@@ -1353,9 +1363,10 @@ format_terse_output() {
     local health_status="${ARRAY_STATUS_DATA[health_status]}"
     local health_details="${ARRAY_STATUS_DATA[health_details]}"
 
-    [ -n "$health_details" ] && health_status="$health_status ($health_details)"
+    local health_formatted="$(format_health_status "$health_status")"
+    [ -n "$health_details" ] && health_formatted="$health_formatted ($health_details)"
 
-    echo "NonRAID Array State: $(format_array_state "$mdstate"), Health: $health_status"
+    echo "NonRAID Array State: $(format_array_state "$mdstate"), Health: $health_formatted"
 }
 
 # Get visible length of a string with ANSI escape codes
@@ -1622,6 +1633,7 @@ monitor_status_loop() {
 
     # Initial screen clear
     printf '\e[2J\e[H'
+    update_status_bar " NonRAID Array Status Monitor - loading..." "$HEADER_BG"
 
     while true; do
         get_all_nmdstat_values NMDSTAT_VALUES
@@ -2083,9 +2095,9 @@ import_disks() {
             continue
         fi
 
-        # Check if this slot has been intentionally disabled (DISK_NP_MISSING status)
+        # Check if this slot has been intentionally disabled (DISK_NP_MISSING or DISK_NP_DSBL status)
         local rdevstatus=$(get_nmdstat_value "rdevStatus.$slot")
-        if [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ -z "$disk_id" ]; then
+        if [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ] || [ -z "$disk_id" ]; then
             echo -e "${YELLOW}Skipping slot $slot: Disk has been unassigned (status: $rdevstatus)${NC}"
             continue
         fi

@@ -988,14 +988,9 @@ format_human_disk_status() {
         widths+=(5 6)
     fi
 
-    if [ "$VERBOSE" -eq 1 ]; then
-        headers+=("Drive ID")
-        widths+=(12)
-    fi
-
     # Update column widths based on actual data lengths
     for entry in "${disk_entries[@]}"; do
-        IFS='|' read -r slot slot_display status_formatted device size diskname fs mountpoint usage read_rate write_rate disk_id <<< "$entry"
+        IFS='|' read -r slot slot_display status_formatted device size diskname fs mountpoint usage read_rate write_rate <<< "$entry"
 
         local slot_len=${#slot_display}
         [ "$slot_len" -gt "${widths[0]}" ] && widths[0]=$slot_len
@@ -1027,12 +1022,6 @@ format_human_disk_status() {
 
             local write_len=$(get_visible_length "$write_rate")
             [ "$write_len" -gt "${widths[9]}" ] && widths[9]=$write_len
-        fi
-
-        if [ "$VERBOSE" -eq 1 ]; then
-            local last_idx=$((${#widths[@]} - 1))
-            local disk_id_len=${#disk_id}
-            [ "$disk_id_len" -gt "${widths[last_idx]}" ] && widths[last_idx]=$disk_id_len
         fi
     done
 
@@ -1069,7 +1058,7 @@ format_disk_entry_line() {
     local widths=("$@")
     local array_started="${DISK_STATUS_DATA[array_started]}"
 
-    IFS='|' read -r slot slot_display status_formatted device size diskname fs mountpoint usage read_rate write_rate disk_id <<< "$entry"
+    IFS='|' read -r slot slot_display status_formatted device size diskname fs mountpoint usage read_rate write_rate <<< "$entry"
 
     printf "%-*s" "${widths[0]}" "$slot_display"
 
@@ -1093,10 +1082,6 @@ format_disk_entry_line() {
         local write_visible_length=$(get_visible_length "$write_rate")
         printf "  %s" "$write_rate"
         printf "%*s" "$((widths[9] - write_visible_length))" ""
-    fi
-
-    if [ "$VERBOSE" -eq 1 ]; then
-        printf "  %s" "$disk_id"
     fi
 
     printf "\n"
@@ -1414,6 +1399,11 @@ format_disk_entry_data() {
         slot_display="Q"
     fi
 
+    local device="$rdevname"
+    if [ "$VERBOSE" -eq 1 ]; then
+        device="$diskid ($rdevname)"
+    fi
+
     local size_display="$sizegb"
     if [ "$VERBOSE" -eq 1 ]; then
         size_display="$disksize"
@@ -1436,7 +1426,7 @@ format_disk_entry_data() {
         write_rate=$(format_rate_or_count "${DISK_STATUS_DATA[slot_${idx}_write_rate_scaled]:-0}" "slot_${idx}_writes")
     fi
 
-    echo "$idx|$slot_display|$status_formatted|$rdevname|$size_display|$diskname_display|$fs_type|$mountpoint|$usage|$read_rate|$write_rate|$diskid"
+    echo "$idx|$slot_display|$status_formatted|$device|$size_display|$diskname_display|$fs_type|$mountpoint|$usage|$read_rate|$write_rate"
 }
 
 # Main output formatter

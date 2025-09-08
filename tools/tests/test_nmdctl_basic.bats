@@ -302,7 +302,7 @@ rdevNumErrors.29=0/' \
     echo "$output"
     [ "$status" -eq 0 ]
     [[ "$output" =~ Parity.*Dual\ Parity ]]
-    [[ "$output" =~ "sdd1    1500000" ]]
+    [[ "$output" =~ "MOCK_PARITY_DISK_2 (sdd1)  1500000" ]]
 }
 
 @test "unassigning a disk" {

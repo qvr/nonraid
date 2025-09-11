@@ -498,18 +498,26 @@ collect_array_health() {
     local total_slots=$(get_defined_slots_count)
 
     # Count how many disks have been imported and how many read/write errors there are
+    # and how many unassigned disks there are
+    # XXX: there's still the terminology issue that a disk slot can be unassigned and unimported,
+    # we currently only count imported unassigned slots
     local imported_disks=0
+    local unassigned_disks=0
     local disks_num_errors=0
     for slot in $(get_defined_slots); do
         local rdevname="${NMDSTAT_VALUES[rdevName.$slot]}"
+        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$slot]}"
         if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
             imported_disks=$((imported_disks + 1))
+        elif [ "$rdevstatus" = "DISK_NP_DSBL" ] || [ "$rdevstatus" = "DISK_NP_MISSING" ]; then
+            unassigned_disks=$((unassigned_disks + 1))
         fi
         disks_num_errors=$((disks_num_errors + "${NMDSTAT_VALUES[rdevNumErrors.$slot]}"))
     done
 
     # Store all health-related data
     ARRAY_STATUS_DATA["imported_disks"]="$imported_disks"
+    ARRAY_STATUS_DATA["unassigned_disks"]="$unassigned_disks"
     ARRAY_STATUS_DATA["disks_num_errors"]="$disks_num_errors"
     ARRAY_STATUS_DATA["mdnummissing"]="$mdnummissing"
     ARRAY_STATUS_DATA["mdnuminvalid"]="$mdnuminvalid"
@@ -578,6 +586,9 @@ collect_array_health() {
     elif [ "$imported_disks" -eq 0 ] && [ "$total_slots" -gt 0 ]; then
         health_status="OFFLINE"
         health_details="No disks imported"
+        if [ "$unassigned_disks" -gt 0 ]; then
+            health_details="$health_details, $unassigned_disks unassigned"
+        fi
         health_code=2
     elif [ "$imported_disks" -eq 0 ] && [ "$total_slots" -eq 0 ]; then
         health_status="OFFLINE"
@@ -586,6 +597,9 @@ collect_array_health() {
     elif [ "$imported_disks" -lt "$total_slots" ] && [ "$mdstate" != "STARTED" ]; then
         health_status="PARTIAL"
         health_details="$imported_disks/$total_slots disks imported"
+        if [ "$unassigned_disks" -gt 0 ]; then
+            health_details="$health_details, $unassigned_disks unassigned"
+        fi
         health_code=1
     elif [ "$mdnummissing" -gt 0 ] || [ "$mdnuminvalid" -gt 0 ] ||
          [ "$mdnumwrong" -gt 0 ] || [ "$mdnumdisabled" -gt 0 ] ||
@@ -1127,6 +1141,11 @@ format_prometheus_output() {
     echo "# TYPE nonraid_disks_imported gauge"
     echo "nonraid_disks_imported{label=\"$label\"} ${ARRAY_STATUS_DATA[imported_disks]}"
 
+    echo ""
+    echo "# HELP nonraid_disks_unassigned Number of unassigned disks in the array"
+    echo "# TYPE nonraid_disks_unassigned gauge"
+    echo "nonraid_disks_unassigned{label=\"$label\"} ${ARRAY_STATUS_DATA[unassigned_disks]}"
+
     # Array size metrics
     echo ""
     echo "# HELP nonraid_array_size_gb Total array data size in GB"
@@ -1260,6 +1279,7 @@ format_json_output() {
     echo "    \"superblock\": \"${ARRAY_STATUS_DATA[sbname]}\","
     echo "    \"disks_present\": ${ARRAY_STATUS_DATA[mdnumdisks]},"
     echo "    \"disks_imported\": ${ARRAY_STATUS_DATA[imported_disks]},"
+    echo "    \"disks_unassigned\": ${ARRAY_STATUS_DATA[unassigned_disks]},"
     echo "    \"total_slots\": ${ARRAY_STATUS_DATA[total_slots]},"
     echo "    \"health\": {"
     echo "      \"status\": \"${ARRAY_STATUS_DATA[health_status]}\","
@@ -2150,8 +2170,13 @@ import_disks() {
 
         # Check if this slot has been intentionally disabled (DISK_NP_MISSING or DISK_NP_DSBL status)
         local rdevstatus=$(get_nmdstat_value "rdevStatus.$slot")
-        if [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ] || [ -z "$disk_id" ]; then
+        if [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ]; then
             echo -e "${YELLOW}Skipping slot $slot: Disk has been unassigned (status: $rdevstatus)${NC}"
+            continue
+        elif [ "$rdevstatus" = "DISK_NP" ] && [ -z "$disk_id" ]; then
+            echo -e "Slot $slot has been ${YELLOW}unassigned${NC}, importing slot as empty"
+            disks_to_import+=("$slot||0|0|0|")
+            num_disks=$((num_disks + 1))
             continue
         fi
 
@@ -2241,7 +2266,7 @@ import_disks() {
         for disk_data in "${disks_to_import[@]}"; do
             IFS='|' read -r slot partition offset size erased id <<< "$disk_data"
 
-            echo -e "Importing disk to slot $slot: ${BLUE}$partition${NC}"
+            echo -e "Importing disk to slot $slot: ${BLUE}${partition:-${YELLOW}(empty)}${NC}"
             if ! run_nmd_command "import $slot $partition $offset $size $erased $id"; then
                 echo -e "${RED}Error: Failed to import disk to slot $slot${NC}"
             fi

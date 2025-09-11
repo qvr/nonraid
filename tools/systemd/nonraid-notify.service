@@ -1,6 +1,6 @@
 [Unit]
 Description=NonRAID status notifier
-Requires=nonraid.service
+Requisite=nonraid.service
 After=nonraid.service
 
 [Service]

@@ -579,6 +579,10 @@ collect_array_health() {
         health_status="OFFLINE"
         health_details="No disks imported"
         health_code=2
+    elif [ "$imported_disks" -eq 0 ] && [ "$total_slots" -eq 0 ]; then
+        health_status="OFFLINE"
+        health_details="Array is unconfigured"
+        health_code=2
     elif [ "$imported_disks" -lt "$total_slots" ] && [ "$mdstate" != "STARTED" ]; then
         health_status="PARTIAL"
         health_details="$imported_disks/$total_slots disks imported"

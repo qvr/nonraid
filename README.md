@@ -222,6 +222,8 @@ Create a fresh partition table and a single aligned partition covering the disk 
 sudo sgdisk -o -a 8 -n 1:32K:0 /dev/sdX
 ```
 
+This command creates a new GPT partition table (`-o`) with 8-sector alignment (`-a 8`), adds a single partition (`-n 1`) starting at 32KB (`32K`) and extending to the end of the disk (`0`).
+
 **Create the array configuration**
 
 Run the interactive wizard and assign 1–2 largest disks as parity. Assign remaining disks into data slots. Confirm when prompted.
@@ -253,7 +255,7 @@ If you want encryption, do for each data device first, then create the filesyste
 
 ```bash
 sudo cryptsetup luksFormat /dev/nmd1p1
-sudo cryptsetup open /dev/nmd1p1 nmd1p1
+sudo cryptsetup open /dev/nmd1p1 nmd1p1 # Use the NonRAID disk name as the mapper name
 # Then in next step format /dev/mapper/nmd1p1 instead of the raw /dev/nmd1p1
 ```
 
@@ -289,11 +291,11 @@ Let `nmdctl` mount everything (creates `/mnt/diskN` by default; opens LUKS devic
 sudo nmdctl mount
 ```
 
-Mount point prefix can be configured in `/etc/default/nonraid`. You can optionally combine the mountpoints with mergerfs (outside the scope of this quick start).
+Mount point prefix can be configured in [/etc/default/nonraid](tools/systemd/nonraid.default). You can optionally combine the mountpoints with [mergerfs](https://github.com/trapexit/mergerfs) (outside the scope of this quick start).
 
 **Configure notifications and verify auto‑start**
 
-Configure notifications for array events by editing `/etc/default/nonraid` and setting `NONRAID_NOTIFY_CMD` to your desired notification command.
+Configure notifications for array events by editing [/etc/default/nonraid](tools/systemd/nonraid.default) and setting `NONRAID_NOTIFY_CMD` to your desired notification command.
 
 Once the initial parity sync is complete, you should reboot once to verify the included systemd services / timers load and the array & disks auto‑start / mount:
 

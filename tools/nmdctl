@@ -2155,6 +2155,7 @@ import_disks() {
     # Process all defined disk slots
     for slot in $(get_defined_slots); do
         local disk_id=$(get_nmdstat_value "diskId.$slot")
+        local disk_state=$(get_nmdstat_value "diskState.$slot")
         local short_id="${disk_id}"
         if [ ${#short_id} -gt 33 ]; then
             # If diskId is longer than 32 characters, truncate it for display
@@ -2177,6 +2178,12 @@ import_disks() {
             echo -e "Slot $slot has been ${YELLOW}unassigned${NC}, importing slot as empty"
             disks_to_import+=("$slot||0|0|0|")
             num_disks=$((num_disks + 1))
+            continue
+        fi
+
+        # Check if disk has been disabled due to errors
+        if [ "$disk_state" -eq 4 ]; then
+            echo -e "${YELLOW}Skipping slot $slot: Disk has been disabled due to errors and needs to be unassigned (state: $disk_state)${NC}"
             continue
         fi
 
@@ -3447,6 +3454,7 @@ unassign_disk() {
     fi
 
     echo -e "${GREEN}Successfully unassigned disk from slot $slot_display${NC}"
+    echo -e "${YELLOW}Note: To commit the change, you need to start the array.${NC}"
     echo ""
 
     # Show array status

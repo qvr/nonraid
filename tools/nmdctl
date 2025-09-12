@@ -1424,7 +1424,10 @@ format_disk_entry_data() {
     fi
 
     local device="$rdevname"
-    if [ "$VERBOSE" -eq 1 ]; then
+    if [ "$rdevname" = "none" ] && [ -z "$diskid" ]; then
+        device="(unassigned)"
+    fi
+    if [ "$VERBOSE" -eq 1 ] && [ -n "$diskid" ]; then
         device="$diskid ($rdevname)"
     fi
 

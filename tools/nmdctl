@@ -263,10 +263,10 @@ format_disk_status() {
         "DISK_WRONG")
             echo -e "${RED}WRONG${NC}"
             ;;
-        "DISK_DSBL"|"DISK_NP_DSBL"|"DISK_DSBL_NEW")
+        "DISK_DSBL"|"DISK_NP_DSBL")
             echo -e "${YELLOW}DISABLED${NC}"
             ;;
-        "DISK_NEW")
+        "DISK_NEW"|"DISK_DSBL_NEW")
             echo -e "${BLUE}NEW${NC}"
             ;;
         *)

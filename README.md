@@ -34,6 +34,7 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
   - [Option 2: Install from GitHub Releases](#option-2-install-from-github-releases)
   - [Option 3: Fully manual installation from repository source](#option-3-fully-manual-installation-from-repository-source)
   - [Post-installation steps](#post-installation-steps)
+- [Quick Start](#quick-start)
 - [Array Management](#array-management)
   - [Display array status](#display-array-status)
   - [Create a new array (interactive)](#create-a-new-array-interactive)
@@ -206,6 +207,104 @@ This [nmdctl](#array-management) command will load the NonRAID driver module and
 
 > [!TIP]
 > `/nonraid.dat` is the default location for the superblock file used by the `nmdctl` tool. The superblock file contains the array configuration and is stored outside of the array disks. You can specify a different superblock file location with the `-s` option, as explained in the "Using a custom superblock file location" section below.
+
+## Quick Start
+After installing the NonRAID kernel modules and tools, here are the steps to bring a brand new NonRAID array online, format disks, and configure the included systemd services.
+
+**Prepare and partition disks**
+
+Identify the raw devices you want to use (e.g. `/dev/sdb`, `/dev/sdc`, `/dev/sdd`). They must NOT contain data you still need. Ensure each disk has a stable / unique ID in `/dev/disk/by-id/` (virtual environments sometimes need tuning for this).
+
+Create a fresh partition table and a single aligned partition covering the disk - this will wipe any existing data on the disk:
+
+```bash
+# Check carefully for correct disk letters before running!
+sudo sgdisk -o -a 8 -n 1:32K:0 /dev/sdX
+```
+
+**Create the array configuration**
+
+Run the interactive wizard and assign 1–2 largest disks as parity. Assign remaining disks into data slots. Confirm when prompted.
+
+```bash
+sudo nmdctl create
+```
+
+**Start the array and run initial parity sync**
+
+The create wizard can start it immediately when finished; if you skipped that option:
+
+```bash
+sudo nmdctl start
+```
+
+Then kick off the initial array parity sync:
+
+```bash
+sudo nmdctl check
+```
+This can take several hours depending on disk sizes. You can monitor progress with `sudo nmdctl status --monitor`, but you can also proceed to creating filesystems and mounting the disks while the parity sync runs in the background.
+
+After start, new block devices appear for data disks as `/dev/nmd1p1`, `/dev/nmd2p1`, ...
+
+**(Optional) Enable LUKS encryption BEFORE filesystem creation**
+
+If you want encryption, do for each data device first, then create the filesystem on the opened mapper path:
+
+```bash
+sudo cryptsetup luksFormat /dev/nmd1p1
+sudo cryptsetup open /dev/nmd1p1 nmd1p1
+# Then in next step format /dev/mapper/nmd1p1 instead of the raw /dev/nmd1p1
+```
+
+You can save the LUKS keyfile as `/etc/nonraid/luks-keyfile` so that `nmdctl mount` can open the disks automatically on boot.
+
+**Create filesystems on the NonRAID block devices**
+
+XFS:
+```bash
+sudo mkfs.xfs /dev/nmd1p1
+sudo mkfs.xfs /dev/nmd2p1
+# Repeat for all data slots
+```
+
+BTRFS also works (`sudo mkfs.btrfs /dev/nmd3p1`).
+
+For ZFS, name the pools as `diskN` where N is the slot number so that `nmdctl mount` works properly:
+
+```bash
+sudo zpool create disk3 /dev/nmd3p1
+```
+
+You can use any combination of different filesystems based on your needs.
+
+> [!IMPORTANT]
+> Always use the NonRAID block devices (`/dev/nmdXp1`) for filesystem creation, never the underlying raw drives (`/dev/sdX`). Using raw drives bypasses parity protection and will invalidate the array parity.
+
+**Mount the data disks**
+
+Let `nmdctl` mount everything (creates `/mnt/diskN` by default; opens LUKS devices automatically if keyfile is present):
+
+```bash
+sudo nmdctl mount
+```
+
+Mount point prefix can be configured in `/etc/default/nonraid`. You can optionally combine the mountpoints with mergerfs (outside the scope of this quick start).
+
+**Configure notifications and verify auto‑start**
+
+Configure notifications for array events by editing `/etc/default/nonraid` and setting `NONRAID_NOTIFY_CMD` to your desired notification command.
+
+Once the initial parity sync is complete, you should reboot once to verify the included systemd services / timers load and the array & disks auto‑start / mount:
+
+```bash
+sudo reboot
+# After reboot verify the array has started and disks are mounted:
+sudo nmdctl status
+df -h | grep /mnt/disk
+```
+
+You now have a running NonRAID array with individually formatted disks, parity protection, and automatic startup. You can read on for detailed usage of the `nmdctl` commands below.
 
 ## Array Management
 

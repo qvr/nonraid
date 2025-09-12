@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.16.1
+VERSION=1.17.0
 
 # Colors for pretty output
 RED='\033[0;31m'
@@ -263,10 +263,10 @@ format_disk_status() {
         "DISK_WRONG")
             echo -e "${RED}WRONG${NC}"
             ;;
-        "DISK_DSBL"|"DISK_NP_DSBL"|"DISK_DSBL_NEW")
+        "DISK_DSBL"|"DISK_NP_DSBL")
             echo -e "${YELLOW}DISABLED${NC}"
             ;;
-        "DISK_NEW")
+        "DISK_NEW"|"DISK_DSBL_NEW")
             echo -e "${BLUE}NEW${NC}"
             ;;
         *)
@@ -498,18 +498,26 @@ collect_array_health() {
     local total_slots=$(get_defined_slots_count)
 
     # Count how many disks have been imported and how many read/write errors there are
+    # and how many unassigned disks there are
+    # XXX: there's still the terminology issue that a disk slot can be unassigned and unimported,
+    # we currently only count imported unassigned slots
     local imported_disks=0
+    local unassigned_disks=0
     local disks_num_errors=0
     for slot in $(get_defined_slots); do
         local rdevname="${NMDSTAT_VALUES[rdevName.$slot]}"
+        local rdevstatus="${NMDSTAT_VALUES[rdevStatus.$slot]}"
         if [ -n "$rdevname" ] && [ "$rdevname" != "none" ]; then
             imported_disks=$((imported_disks + 1))
+        elif [ "$rdevstatus" = "DISK_NP_DSBL" ] || [ "$rdevstatus" = "DISK_NP_MISSING" ]; then
+            unassigned_disks=$((unassigned_disks + 1))
         fi
         disks_num_errors=$((disks_num_errors + "${NMDSTAT_VALUES[rdevNumErrors.$slot]}"))
     done
 
     # Store all health-related data
     ARRAY_STATUS_DATA["imported_disks"]="$imported_disks"
+    ARRAY_STATUS_DATA["unassigned_disks"]="$unassigned_disks"
     ARRAY_STATUS_DATA["disks_num_errors"]="$disks_num_errors"
     ARRAY_STATUS_DATA["mdnummissing"]="$mdnummissing"
     ARRAY_STATUS_DATA["mdnuminvalid"]="$mdnuminvalid"
@@ -578,10 +586,20 @@ collect_array_health() {
     elif [ "$imported_disks" -eq 0 ] && [ "$total_slots" -gt 0 ]; then
         health_status="OFFLINE"
         health_details="No disks imported"
+        if [ "$unassigned_disks" -gt 0 ]; then
+            health_details="$health_details, $unassigned_disks unassigned"
+        fi
+        health_code=2
+    elif [ "$imported_disks" -eq 0 ] && [ "$total_slots" -eq 0 ]; then
+        health_status="OFFLINE"
+        health_details="Array is unconfigured"
         health_code=2
     elif [ "$imported_disks" -lt "$total_slots" ] && [ "$mdstate" != "STARTED" ]; then
         health_status="PARTIAL"
         health_details="$imported_disks/$total_slots disks imported"
+        if [ "$unassigned_disks" -gt 0 ]; then
+            health_details="$health_details, $unassigned_disks unassigned"
+        fi
         health_code=1
     elif [ "$mdnummissing" -gt 0 ] || [ "$mdnuminvalid" -gt 0 ] ||
          [ "$mdnumwrong" -gt 0 ] || [ "$mdnumdisabled" -gt 0 ] ||
@@ -984,20 +1002,13 @@ format_human_disk_status() {
         headers+=("Disk Name" "FS" "Mountpoint" "Usage")
         widths+=(9 2 10 5)
 
-        if [ "$MONITOR_MODE" -eq 1 ]; then
-            headers+=("Read(MB/s)" "Write(MB/s)")
-            widths+=(10 11)
-        fi
-    fi
-
-    if [ "$VERBOSE" -eq 1 ]; then
-        headers+=("Drive ID")
-        widths+=(12)
+        headers+=("Reads" "Writes")
+        widths+=(5 6)
     fi
 
     # Update column widths based on actual data lengths
     for entry in "${disk_entries[@]}"; do
-        IFS='|' read -r slot slot_display status_formatted device size diskname fs mountpoint usage read_rate write_rate disk_id <<< "$entry"
+        IFS='|' read -r slot slot_display status_formatted device size diskname fs mountpoint usage read_rate write_rate <<< "$entry"
 
         local slot_len=${#slot_display}
         [ "$slot_len" -gt "${widths[0]}" ] && widths[0]=$slot_len
@@ -1024,19 +1035,11 @@ format_human_disk_status() {
             local usage_len=${#usage}
             [ "$usage_len" -gt "${widths[7]}" ] && widths[7]=$usage_len
 
-            if [ "$MONITOR_MODE" -eq 1 ]; then
-                local read_len=${#read_rate}
-                [ "$read_len" -gt "${widths[8]}" ] && widths[8]=$read_len
+            local read_len=$(get_visible_length "$read_rate")
+            [ "$read_len" -gt "${widths[8]}" ] && widths[8]=$read_len
 
-                local write_len=${#write_rate}
-                [ "$write_len" -gt "${widths[9]}" ] && widths[9]=$write_len
-            fi
-        fi
-
-        if [ "$VERBOSE" -eq 1 ]; then
-            local last_idx=$((${#widths[@]} - 1))
-            local disk_id_len=${#disk_id}
-            [ "$disk_id_len" -gt "${widths[last_idx]}" ] && widths[last_idx]=$disk_id_len
+            local write_len=$(get_visible_length "$write_rate")
+            [ "$write_len" -gt "${widths[9]}" ] && widths[9]=$write_len
         fi
     done
 
@@ -1073,7 +1076,7 @@ format_disk_entry_line() {
     local widths=("$@")
     local array_started="${DISK_STATUS_DATA[array_started]}"
 
-    IFS='|' read -r slot slot_display status_formatted device size diskname fs mountpoint usage read_rate write_rate disk_id <<< "$entry"
+    IFS='|' read -r slot slot_display status_formatted device size diskname fs mountpoint usage read_rate write_rate <<< "$entry"
 
     printf "%-*s" "${widths[0]}" "$slot_display"
 
@@ -1090,14 +1093,13 @@ format_disk_entry_line() {
         printf "  %-*s" "${widths[6]}" "$mountpoint"
         printf "  %-*s" "${widths[7]}" "$usage"
 
-        if [ "$MONITOR_MODE" -eq 1 ]; then
-            printf "  %-*s" "${widths[8]}" "$read_rate"
-            printf "  %-*s" "${widths[9]}" "$write_rate"
-        fi
-    fi
+        local read_visible_length=$(get_visible_length "$read_rate")
+        printf "  %s" "$read_rate"
+        printf "%*s" "$((widths[8] - read_visible_length))" ""
 
-    if [ "$VERBOSE" -eq 1 ]; then
-        printf "  %s" "$disk_id"
+        local write_visible_length=$(get_visible_length "$write_rate")
+        printf "  %s" "$write_rate"
+        printf "%*s" "$((widths[9] - write_visible_length))" ""
     fi
 
     printf "\n"
@@ -1138,6 +1140,11 @@ format_prometheus_output() {
     echo "# HELP nonraid_disks_imported Number of disks imported in the array"
     echo "# TYPE nonraid_disks_imported gauge"
     echo "nonraid_disks_imported{label=\"$label\"} ${ARRAY_STATUS_DATA[imported_disks]}"
+
+    echo ""
+    echo "# HELP nonraid_disks_unassigned Number of unassigned disks in the array"
+    echo "# TYPE nonraid_disks_unassigned gauge"
+    echo "nonraid_disks_unassigned{label=\"$label\"} ${ARRAY_STATUS_DATA[unassigned_disks]}"
 
     # Array size metrics
     echo ""
@@ -1272,6 +1279,7 @@ format_json_output() {
     echo "    \"superblock\": \"${ARRAY_STATUS_DATA[sbname]}\","
     echo "    \"disks_present\": ${ARRAY_STATUS_DATA[mdnumdisks]},"
     echo "    \"disks_imported\": ${ARRAY_STATUS_DATA[imported_disks]},"
+    echo "    \"disks_unassigned\": ${ARRAY_STATUS_DATA[unassigned_disks]},"
     echo "    \"total_slots\": ${ARRAY_STATUS_DATA[total_slots]},"
     echo "    \"health\": {"
     echo "      \"status\": \"${ARRAY_STATUS_DATA[health_status]}\","
@@ -1415,6 +1423,14 @@ format_disk_entry_data() {
         slot_display="Q"
     fi
 
+    local device="$rdevname"
+    if [ "$rdevname" = "none" ] && [ -z "$diskid" ]; then
+        device="(unassigned)"
+    fi
+    if [ "$VERBOSE" -eq 1 ] && [ -n "$diskid" ]; then
+        device="$diskid ($rdevname)"
+    fi
+
     local size_display="$sizegb"
     if [ "$VERBOSE" -eq 1 ]; then
         size_display="$disksize"
@@ -1432,12 +1448,12 @@ format_disk_entry_data() {
         fs_type="$slottype"
     fi
 
-    if [ "$MONITOR_MODE" -eq 1 ] && [ "$array_started" = "true" ]; then
-        read_rate=$(format_io_rate "${DISK_STATUS_DATA[slot_${idx}_read_rate_scaled]:-0}")
-        write_rate=$(format_io_rate "${DISK_STATUS_DATA[slot_${idx}_write_rate_scaled]:-0}")
+    if [ "$array_started" = "true" ]; then
+        read_rate=$(format_rate_or_count "${DISK_STATUS_DATA[slot_${idx}_read_rate_scaled]:-0}" "slot_${idx}_reads")
+        write_rate=$(format_rate_or_count "${DISK_STATUS_DATA[slot_${idx}_write_rate_scaled]:-0}" "slot_${idx}_writes")
     fi
 
-    echo "$idx|$slot_display|$status_formatted|$rdevname|$size_display|$diskname_display|$fs_type|$mountpoint|$usage|$read_rate|$write_rate|$diskid"
+    echo "$idx|$slot_display|$status_formatted|$device|$size_display|$diskname_display|$fs_type|$mountpoint|$usage|$read_rate|$write_rate"
 }
 
 # Main output formatter
@@ -1571,6 +1587,17 @@ calculate_disk_io_rates() {
     DISK_STATUS_DATA["timestamp_prev"]="$current_timestamp"
 }
 
+format_rate_or_count() {
+    local rate_scaled="$1"
+    local count_key="$2"
+
+    if [ "$MONITOR_MODE" -eq 1 ] && [ "$rate_scaled" -gt 0 ]; then
+        format_io_rate "$rate_scaled"
+    else
+        format_io_count "${DISK_STATUS_DATA[$count_key]:-0}"
+    fi
+}
+
 format_io_rate() {
     # Input is scaled by 100 (e.g., 250 = 2.50 MB/s)
     # Convert scaled value back to MB/s with 2 decimals
@@ -1580,9 +1607,58 @@ format_io_rate() {
         local rate_int=$((rate_scaled / 100))
         local rate_decimal=$((rate_scaled % 100))
 
-        printf "%d.%02d" "$rate_int" "$rate_decimal"
+        printf "${GREEN}%d.%02d MB/s${NC}" "$rate_int" "$rate_decimal"
     else
         echo -n "-"
+    fi
+}
+
+format_io_count() {
+    # Format 4kB block counts as bytes with appropriate suffixes (B, kB, MB, GB, TB)
+    local count="$1"
+
+    if [ "$count" -eq 0 ]; then
+        echo -n "-"
+        return
+    fi
+
+    # Convert 4kB blocks to bytes
+    local bytes=$((count * 4096))
+
+    if [ "$bytes" -lt 1024 ]; then
+        printf "%dB" "$bytes"
+    elif [ "$bytes" -lt 1048576 ]; then  # 1024^2
+        local kb=$((bytes / 1024))
+        local remainder=$((bytes % 1024))
+        if [ "$remainder" -ge 102 ]; then  # Show decimal if > 0.1kB
+            printf "%d.%dkB" "$kb" $((remainder * 10 / 1024))
+        else
+            printf "%dkB" "$kb"
+        fi
+    elif [ "$bytes" -lt 1073741824 ]; then  # 1024^3
+        local mb=$((bytes / 1048576))
+        local remainder=$((bytes % 1048576))
+        if [ "$remainder" -ge 104857 ]; then  # Show decimal if > 0.1MB
+            printf "%d.%dMB" "$mb" $((remainder * 10 / 1048576))
+        else
+            printf "%dMB" "$mb"
+        fi
+    elif [ "$bytes" -lt 1099511627776 ]; then  # 1024^4
+        local gb=$((bytes / 1073741824))
+        local remainder=$((bytes % 1073741824))
+        if [ "$remainder" -ge 107374182 ]; then  # Show decimal if > 0.1GB
+            printf "%d.%dGB" "$gb" $((remainder * 10 / 1073741824))
+        else
+            printf "%dGB" "$gb"
+        fi
+    else
+        local tb=$((bytes / 1099511627776))
+        local remainder=$((bytes % 1099511627776))
+        if [ "$remainder" -ge 109951162777 ]; then  # Show decimal if > 0.1TB
+            printf "%d.%dTB" "$tb" $((remainder * 10 / 1099511627776))
+        else
+            printf "%dTB" "$tb"
+        fi
     fi
 }
 
@@ -2082,6 +2158,7 @@ import_disks() {
     # Process all defined disk slots
     for slot in $(get_defined_slots); do
         local disk_id=$(get_nmdstat_value "diskId.$slot")
+        local disk_state=$(get_nmdstat_value "diskState.$slot")
         local short_id="${disk_id}"
         if [ ${#short_id} -gt 33 ]; then
             # If diskId is longer than 32 characters, truncate it for display
@@ -2097,8 +2174,19 @@ import_disks() {
 
         # Check if this slot has been intentionally disabled (DISK_NP_MISSING or DISK_NP_DSBL status)
         local rdevstatus=$(get_nmdstat_value "rdevStatus.$slot")
-        if [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ] || [ -z "$disk_id" ]; then
+        if [ "$rdevstatus" = "DISK_NP_MISSING" ] || [ "$rdevstatus" = "DISK_NP_DSBL" ]; then
             echo -e "${YELLOW}Skipping slot $slot: Disk has been unassigned (status: $rdevstatus)${NC}"
+            continue
+        elif [ "$rdevstatus" = "DISK_NP" ] && [ -z "$disk_id" ]; then
+            echo -e "Slot $slot has been ${YELLOW}unassigned${NC}, importing slot as empty"
+            disks_to_import+=("$slot||0|0|0|")
+            num_disks=$((num_disks + 1))
+            continue
+        fi
+
+        # Check if disk has been disabled due to errors
+        if [ "$disk_state" -eq 4 ]; then
+            echo -e "${YELLOW}Skipping slot $slot: Disk has been disabled due to errors and needs to be unassigned (state: $disk_state)${NC}"
             continue
         fi
 
@@ -2188,7 +2276,7 @@ import_disks() {
         for disk_data in "${disks_to_import[@]}"; do
             IFS='|' read -r slot partition offset size erased id <<< "$disk_data"
 
-            echo -e "Importing disk to slot $slot: ${BLUE}$partition${NC}"
+            echo -e "Importing disk to slot $slot: ${BLUE}${partition:-${YELLOW}(empty)}${NC}"
             if ! run_nmd_command "import $slot $partition $offset $size $erased $id"; then
                 echo -e "${RED}Error: Failed to import disk to slot $slot${NC}"
             fi
@@ -3369,6 +3457,7 @@ unassign_disk() {
     fi
 
     echo -e "${GREEN}Successfully unassigned disk from slot $slot_display${NC}"
+    echo -e "${YELLOW}Note: To commit the change, you need to start the array.${NC}"
     echo ""
 
     # Show array status

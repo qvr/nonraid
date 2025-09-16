@@ -1909,32 +1909,40 @@ format_resync_action() {
     echo "$formatted_action"
 }
 
-# Get filesystem type for a device using blkid
 get_fs_type() {
     local device="$1"
+    local fs_type=""
 
-    if [ -b "$device" ]; then
-        # Run blkid to get the filesystem type
-        local fs_type=$(blkid -o value -s TYPE "$device" 2>/dev/null)
+    if [ ! -b "$device" ]; then
+        echo ""
+        return 1
+    fi
 
-        # Convert zfs_member to just zfs
-        if [ "$fs_type" = "zfs_member" ]; then
+    # Try lsblk first, it consults udev cache and is usually fast
+    fs_type=$(lsblk -no FSTYPE "$device" 2>/dev/null | head -n1 | tr -d ' \t\n')
+
+    # Fall back to blkid probing, timeout because it can "block" during very heavy I/O
+    if [ -z "$fs_type" ]; then
+        fs_type=$(timeout 5 blkid -o value -s TYPE -S 4096 "$device" 2>/dev/null)
+    fi
+
+    case "$fs_type" in
+        "zfs_member")
             echo "zfs"
-        elif [ "$fs_type" = "crypto_LUKS" ]; then
+            ;;
+        "crypto_LUKS")
             local luks_fs="$(get_fs_type "/dev/mapper/$(basename "$device")")"
             if [ -z "$luks_fs" ]; then
                 echo "luks"
             else
                 echo "luks+$luks_fs"
             fi
-        else
+            ;;
+        *)
             echo "${fs_type:-unknown}"
-        fi
-        return 0
-    fi
-
-    echo ""
-    return 1
+            ;;
+    esac
+    return 0
 }
 
 # Get mountpoint for a device

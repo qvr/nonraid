@@ -1,0 +1,9 @@
+SUBSYSTEM!="block", GOTO="nmd_end"
+
+# handle nmd arrays
+ACTION=="remove", GOTO="nmd_end"
+KERNEL!="nmd*", GOTO="nmd_end"
+
+IMPORT{builtin}="blkid"
+
+LABEL="nmd_end"

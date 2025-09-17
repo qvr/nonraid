@@ -843,14 +843,23 @@ collect_disk_status() {
                 # Get filesystem information if array is started
                 if [ "$slottype" = "data" ] && [ "$mdstate" = "STARTED" ] && [ -n "$diskname" ] && [ "$diskname" != "none" ] && [ "$NO_FS" -eq 0 ]; then
                     if [ -b "/dev/$diskname" ]; then
-                        local fs_type=$(get_fs_type "/dev/$diskname")
-                        local mountpoint=$(get_mountpoint "$diskname" "$fs_type")
+                        local fs_type mountpoint
+
+                        # In MONITOR_MODE, we trust that fs_type and mountpoint dont really change
+                        if [ "$MONITOR_MODE" -eq 1 ] && [ -n "${DISK_STATUS_DATA[slot_${idx}_fs_type]}" ] && [ -n "${DISK_STATUS_DATA[slot_${idx}_mountpoint]}" ]; then
+                            fs_type="${DISK_STATUS_DATA[slot_${idx}_fs_type]}"
+                            mountpoint="${DISK_STATUS_DATA[slot_${idx}_mountpoint]}"
+                        else
+                            fs_type=$(get_fs_type "/dev/$diskname")
+                            mountpoint=$(get_mountpoint "$diskname" "$fs_type")
+                            DISK_STATUS_DATA["slot_${idx}_fs_type"]="${fs_type:-unknown}"
+                            DISK_STATUS_DATA["slot_${idx}_mountpoint"]="${mountpoint:-unmounted}"
+                        fi
+
                         local usage="-"
                         if [ "$mountpoint" != "unmounted" ] && [ "$mountpoint" != "-" ]; then
                             usage=$(get_fs_usage "$mountpoint" "$fs_type")
                         fi
-                        DISK_STATUS_DATA["slot_${idx}_fs_type"]="${fs_type:-unknown}"
-                        DISK_STATUS_DATA["slot_${idx}_mountpoint"]="${mountpoint:-unmounted}"
                         DISK_STATUS_DATA["slot_${idx}_usage"]="$usage"
                     fi
                 fi

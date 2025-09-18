@@ -62,6 +62,7 @@ jobs:
           cp systemd/nonraid-parity-check.timer debian/nonraid-tools.nonraid-parity-check.timer
           cp systemd/nonraid-notify.service debian/nonraid-tools.nonraid-notify.service
           cp systemd/nonraid-notify.timer debian/nonraid-tools.nonraid-notify.timer
+          cp udev/nonraid.udev debian/nonraid-tools.nonraid.udev
           echo "::endgroup::"
 
           echo "::group::Build Debian Binary Package"
@@ -142,6 +143,7 @@ jobs:
             - `/etc/default/nonraid` systemd unit configuration file
             - `nonraid-parity-check.service + .timer` systemd timer and service files for scheduled parity checks
             - `nonraid-notify.service + .timer` systemd timer and service files for status notifications
+            - `nonraid.udev` udev rules for automatic blkid info caching into udev
 
             ## Changes Since Last Release
             ${{ steps.get-commits.outputs.commits }}

@@ -14,6 +14,9 @@ override_dh_installsystemd:
 override_dh_installinit:
 	dh_installinit -n --name nonraid
 
+override_dh_installudev:
+	dh_installudev --name=nonraid --priority=90
+
 override_dh_fixperms:
 	dh_fixperms
 	chmod 600 debian/nonraid-tools/etc/default/nonraid

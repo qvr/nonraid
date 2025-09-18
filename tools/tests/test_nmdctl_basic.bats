@@ -105,18 +105,85 @@ EOF
     [[ "$output" =~ "Error: Invalid slot number" ]]
 }
 
-@test "convert_blocks_to_gb function" {
+@test "format_kbytes function" {
     # Test basic conversion (1048576 KB = 1 GB)
-    result=$(convert_blocks_to_gb 1048576)
+    result=$(format_kbytes 1048576 0 0 "gb")
+    [ "$result" = "1" ]
+
+    # Test with 1 decimal (1.5 GB)
+    result=$(format_kbytes 1572864 0 1 "gb")
+    [ "$result" = "1.5" ]
+
+    # Test rounding up (should round up to 1)
+    result=$(format_kbytes 1048575 0 0 "gb")
     [ "$result" -eq 1 ]
 
-    # Test with decimals
-    result=$(convert_blocks_to_gb 1572864 2)  # 1.5 GB
-    [ "$result" = "1.50" ]
+    # Test smart decimal display - small remainders show as integers
+    # Exactly 1.0 MB should show as "1" not "1.0"
+    result=$(format_kbytes 1024 1 1)
+    [ "$result" = "1 MB" ]
 
-    # Test rounding up
-    result=$(convert_blocks_to_gb 1048575)
-    [ "$result" -eq 1 ]
+    result=$(format_kbytes 1024 1 2)
+    [ "$result" = "1 MB" ]
+
+    # About 1.09 MB (small remainder) should show as "1"
+    result=$(format_kbytes 1126 1 1)
+    [ "$result" = "1 MB" ]
+
+    result=$(format_kbytes 1126 1 2)
+    [ "$result" = "1 MB" ]
+
+    # 1.5 MB (significant remainder) should show decimals
+    result=$(format_kbytes 1536 1 0)
+    [ "$result" = "2 MB" ]
+
+    result=$(format_kbytes 1536 1 1)
+    [ "$result" = "1.5 MB" ]
+
+    result=$(format_kbytes 1536 1 2)
+    [ "$result" = "1.50 MB" ]
+
+    # Test GB formatting with 2 decimals
+    result=$(format_kbytes 1572864 1 2)  # 1.5 GB
+    [ "$result" = "1.50 GB" ]
+
+    # Test exactly 1 GB shows as integer
+    result=$(format_kbytes 1048576 1 1)  # Exactly 1 GB
+    [ "$result" = "1 GB" ]
+
+    result=$(format_kbytes 1048576 1 2)  # Exactly 1 GB
+    [ "$result" = "1 GB" ]
+
+    # Test default behavior (should default to 1 decimal place)
+    result=$(format_kbytes 1536)
+    [ "$result" = "1.5 MB" ]
+
+    # Test without unit suffix
+    result=$(format_kbytes 1536 0 1)
+    [ "$result" = "1.5" ]
+
+    # Test forced units with no decimals
+    result=$(format_kbytes 1572864 0 0 "gb")
+    [ "$result" = "2" ]
+
+    # Test forced units with decimals
+    result=$(format_kbytes 1572864 0 1 "gb")
+    [ "$result" = "1.5" ]
+
+    # Test KB and B units (should not have decimals)
+    result=$(format_kbytes 1536 1 1 "kb")
+    [ "$result" = "1536 kB" ]
+
+    result=$(format_kbytes 1 1 1 "b")
+    [ "$result" = "1024 B" ]
+
+    # Test TB formatting
+    result=$(format_kbytes 1073741824000 1 1 "tb")  # About 1000 TB
+    [ "$result" = "1000 TB" ]
+
+    # Test very large number with 2 decimals
+    result=$(format_kbytes 1610612736 1 2)  # 1.5 TB
+    [ "$result" = "1.50 TB" ]
 }
 
 @test "format_time_duration function" {
@@ -205,7 +272,7 @@ EOF
     echo "$status"
     echo "$output"
     [ "$status" -eq 0 ]
-    [[ "$output" =~ Array\ Size.*2\ GB\ \(2\ data\ disk\(s\)\) ]]
+    [[ "$output" =~ Array\ Size.*1.9\ GB\ \(2\ data\ disk\(s\)\) ]]
 }
 
 @test "status parsing - Array with invalid disks" {

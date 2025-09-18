@@ -233,20 +233,6 @@ get_nmdstat_value() {
     grep -E "^$1=" "$PROC_NMDSTAT" | cut -d= -f2
 }
 
-# Convert 1k blocks to GB with optional 2 decimal places
-convert_blocks_to_gb() {
-    local blocks="$1"
-    local digits="${2:-0}"
-    if [ "$digits" -gt 0 ]; then
-        local gb_int=$(( blocks * 100 / 1048576 ))
-        local gb_whole=$(( gb_int / 100 ))
-        local gb_frac=$(( gb_int % 100 ))
-        echo "${gb_whole}.$(printf "%02d" $gb_frac)"
-    else
-        echo $(( (blocks + 1048575) / 1048576 ))
-    fi
-}
-
 # Format disk status
 format_disk_status() {
     local status="$1"
@@ -648,7 +634,7 @@ collect_array_size_and_parity() {
     local parity_disk_size="${NMDSTAT_VALUES[diskSize.0]}"
     if [ -n "$parity_disk_size" ] && [ "$parity_disk_size" -gt 0 ]; then
         has_parity=true
-        parity_size_gb=$(convert_blocks_to_gb "$parity_disk_size")
+        parity_size_gb=$(format_kbytes "$parity_disk_size" 0 0 "gb")
     fi
 
     # Check P state
@@ -660,7 +646,7 @@ collect_array_size_and_parity() {
     local second_parity_disk_size="${NMDSTAT_VALUES[diskSize.29]}"
     if [ -n "$second_parity_disk_size" ] && [ "$second_parity_disk_size" -gt 0 ]; then
         has_second_parity=true
-        second_parity_size_gb=$(convert_blocks_to_gb "$second_parity_disk_size")
+        second_parity_size_gb=$(format_kbytes "$second_parity_disk_size" 0 0 "gb")
     fi
 
     # Check Q state
@@ -680,13 +666,16 @@ collect_array_size_and_parity() {
         fi
     done
 
-    data_size_gb=$(convert_blocks_to_gb "$data_size_kb")
+    data_size_gb=$(format_kbytes "$data_size_kb" 0 0 "gb")
 
     ARRAY_STATUS_DATA["has_parity"]="$has_parity"
     ARRAY_STATUS_DATA["has_second_parity"]="$has_second_parity"
+    ARRAY_STATUS_DATA["data_size_kb"]="$data_size_kb"
     ARRAY_STATUS_DATA["data_size_gb"]="$data_size_gb"
     ARRAY_STATUS_DATA["data_disk_count"]="$data_disk_count"
+    ARRAY_STATUS_DATA["parity_size_kb"]="$parity_disk_size"
     ARRAY_STATUS_DATA["parity_size_gb"]="$parity_size_gb"
+    ARRAY_STATUS_DATA["second_parity_size_kb"]="$second_parity_disk_size"
     ARRAY_STATUS_DATA["second_parity_size_gb"]="$second_parity_size_gb"
 }
 
@@ -705,9 +694,11 @@ collect_resync_status() {
     RESYNC_STATUS_DATA["pending"]="false"
     RESYNC_STATUS_DATA["action"]="$mdresyncaction"
     RESYNC_STATUS_DATA["progress_percent"]="0"
+    RESYNC_STATUS_DATA["position_kb"]="0"
     RESYNC_STATUS_DATA["position_gb"]="0"
+    RESYNC_STATUS_DATA["size_kb"]="0"
     RESYNC_STATUS_DATA["size_gb"]="0"
-    RESYNC_STATUS_DATA["rate_mb_s"]="0"
+    RESYNC_STATUS_DATA["rate_kb_s"]="0"
     RESYNC_STATUS_DATA["elapsed_seconds"]="0"
     RESYNC_STATUS_DATA["eta_seconds"]="0"
     RESYNC_STATUS_DATA["friendly_action"]=$(format_resync_action "$mdresyncaction" "$mdresynccorr")
@@ -726,8 +717,10 @@ collect_resync_status() {
             progress=$(( mdresyncpos * 100 / mdresyncsize ))
         fi
         RESYNC_STATUS_DATA["progress_percent"]="$progress"
-        RESYNC_STATUS_DATA["position_gb"]=$(convert_blocks_to_gb "$mdresyncpos" 2)
-        RESYNC_STATUS_DATA["size_gb"]=$(convert_blocks_to_gb "$mdresyncsize" 0)
+        RESYNC_STATUS_DATA["position_kb"]="$mdresyncpos"
+        RESYNC_STATUS_DATA["position_gb"]=$(format_kbytes "$mdresyncpos" 0 1 "gb")
+        RESYNC_STATUS_DATA["size_kb"]="$mdresyncsize"
+        RESYNC_STATUS_DATA["size_gb"]=$(format_kbytes "$mdresyncsize" 0 0 "gb")
     # Check for pending operations
     elif [ "$mdresync" = "0" ] && { [ "$mdresyncaction" = "clear" ] || [[ "$mdresyncaction" == recon* ]]; }; then
         RESYNC_STATUS_DATA["pending"]="true"
@@ -741,23 +734,17 @@ collect_resync_status() {
             progress=$(( mdresyncpos * 100 / mdresyncsize ))
         fi
 
-        # Calculate rate (blocks per second)
-        local rate=0
+        # Calculate rate (blocks per second to KB/s)
+        local rate_kb_s=0
         if [ "$mdresyncdt" -gt 0 ]; then
-            rate=$(( mdresyncdb / mdresyncdt ))
+            rate_kb_s=$(( mdresyncdb / mdresyncdt ))
         fi
-
-        # Convert rate from KB/s to MB/s
-        local rate_mb_int=$(( rate * 100 / 1024 ))
-        local rate_mb_whole=$(( rate_mb_int / 100 ))
-        local rate_mb_frac=$(( rate_mb_int % 100 ))
-        local rate_mb="${rate_mb_whole}.$(printf "%02d" $rate_mb_frac)"
 
         # Calculate estimated time remaining
         local eta_seconds=0
-        if [ "$rate" -gt 0 ] && [ "$mdresyncsize" -gt "$mdresyncpos" ]; then
+        if [ "$rate_kb_s" -gt 0 ] && [ "$mdresyncsize" -gt "$mdresyncpos" ]; then
             local remaining_blocks=$(( mdresyncsize - mdresyncpos ))
-            eta_seconds=$(( remaining_blocks / rate ))
+            eta_seconds=$(( remaining_blocks / rate_kb_s ))
         fi
 
         # Calculate actual elapsed time from start of resync operation
@@ -768,9 +755,11 @@ collect_resync_status() {
         fi
 
         RESYNC_STATUS_DATA["progress_percent"]="$progress"
-        RESYNC_STATUS_DATA["position_gb"]=$(convert_blocks_to_gb "$mdresyncpos" 2)
-        RESYNC_STATUS_DATA["size_gb"]=$(convert_blocks_to_gb "$mdresyncsize" 0)
-        RESYNC_STATUS_DATA["rate_mb_s"]="$rate_mb"
+        RESYNC_STATUS_DATA["position_kb"]="$mdresyncpos"
+        RESYNC_STATUS_DATA["position_gb"]=$(format_kbytes "$mdresyncpos" 0 1 "gb")
+        RESYNC_STATUS_DATA["size_kb"]="$mdresyncsize"
+        RESYNC_STATUS_DATA["size_gb"]=$(format_kbytes "$mdresyncsize" 0 0 "gb")
+        RESYNC_STATUS_DATA["rate_kb_s"]="$rate_kb_s"
         RESYNC_STATUS_DATA["elapsed_seconds"]="$elapsed_seconds"
         RESYNC_STATUS_DATA["eta_seconds"]="$eta_seconds"
     fi
@@ -831,7 +820,7 @@ collect_disk_status() {
                 DISK_STATUS_DATA["slot_${idx}_present"]="true"
                 DISK_STATUS_DATA["slot_${idx}_type"]="$slottype"
                 DISK_STATUS_DATA["slot_${idx}_size_kb"]="$disksize"
-                DISK_STATUS_DATA["slot_${idx}_size_gb"]=$(convert_blocks_to_gb "$disksize")
+                DISK_STATUS_DATA["slot_${idx}_size_gb"]=$(format_kbytes "$disksize" 0 0 "gb")
                 DISK_STATUS_DATA["slot_${idx}_device"]="${rdevname:-none}"
                 DISK_STATUS_DATA["slot_${idx}_status"]="$rdevstatus"
                 DISK_STATUS_DATA["slot_${idx}_errors"]="${rdevnumerrors:-0}"
@@ -916,20 +905,20 @@ format_human_output() {
     echo -e "Array Checked : $last_sync_human"
 
     # Array size and parity
-    local data_size_gb="${ARRAY_STATUS_DATA[data_size_gb]}"
+    local data_size_kb="${ARRAY_STATUS_DATA[data_size_kb]}"
     local data_disk_count="${ARRAY_STATUS_DATA[data_disk_count]}"
     local has_parity="${ARRAY_STATUS_DATA[has_parity]}"
     local has_second_parity="${ARRAY_STATUS_DATA[has_second_parity]}"
-    local parity_size_gb="${ARRAY_STATUS_DATA[parity_size_gb]}"
-    local second_parity_size_gb="${ARRAY_STATUS_DATA[second_parity_size_gb]}"
+    local parity_size_kb="${ARRAY_STATUS_DATA[parity_size_kb]}"
+    local second_parity_size_kb="${ARRAY_STATUS_DATA[second_parity_size_kb]}"
 
-    echo -e "Array Size    : ${data_size_gb} GB (${data_disk_count} data disk(s))"
+    echo -e "Array Size    : $(format_kbytes "$data_size_kb") (${data_disk_count} data disk(s))"
 
     echo -n "Parity        : "
     if [ "$has_parity" = "true" ] && [ "$has_second_parity" = "true" ]; then
-        echo -e "${GREEN}Dual Parity${NC} (P: ${parity_size_gb} GB, Q: ${second_parity_size_gb} GB)"
+        echo -e "${GREEN}Dual Parity${NC} (P: $(format_kbytes "$parity_size_kb") , Q: $(format_kbytes "$second_parity_size_kb"))"
     elif [ "$has_parity" = "true" ]; then
-        echo -e "${GREEN}Single Parity${NC} (${parity_size_gb} GB)"
+        echo -e "${GREEN}Single Parity${NC} ($(format_kbytes "$parity_size_kb"))"
     else
         echo -e "${YELLOW}No Parity${NC}"
     fi
@@ -950,12 +939,14 @@ format_human_resync_status() {
 
     if [ "$paused" = "true" ]; then
         local progress="${RESYNC_STATUS_DATA[progress_percent]}"
-        local pos_gb="${RESYNC_STATUS_DATA[position_gb]}"
-        local size_gb="${RESYNC_STATUS_DATA[size_gb]}"
+        local pos_kb="${RESYNC_STATUS_DATA[position_kb]}"
+        local size_kb="${RESYNC_STATUS_DATA[size_kb]}"
+        local pos_kb_formatted=$(format_kbytes "$pos_kb" 1 2)
+        local size_kb_formatted=$(format_kbytes "$size_kb")
 
         echo ""
         echo -e "Operation     : ${BLUE}$friendly_action${NC} ${YELLOW}(PAUSED)${NC}"
-        echo -e "Progress      : $progress% ($pos_gb/$size_gb GB)"
+        echo -e "Progress      : $progress% ($pos_kb_formatted / $size_kb_formatted)"
         echo -e "${YELLOW}Resume with   : '${GREEN}nmdctl check resume${YELLOW}' command${NC}"
     elif [ "$pending" = "true" ]; then
         local action="${RESYNC_STATUS_DATA[action]}"
@@ -968,19 +959,22 @@ format_human_resync_status() {
         echo -e "${YELLOW}${array_start_hint} '${GREEN}nmdctl check${YELLOW}' command to start the operation${NC}"
     elif [ "$active" = "true" ]; then
         local progress="${RESYNC_STATUS_DATA[progress_percent]}"
-        local pos_gb="${RESYNC_STATUS_DATA[position_gb]}"
-        local size_gb="${RESYNC_STATUS_DATA[size_gb]}"
-        local rate_mb="${RESYNC_STATUS_DATA[rate_mb_s]}"
+        local pos_kb="${RESYNC_STATUS_DATA[position_kb]}"
+        local size_kb="${RESYNC_STATUS_DATA[size_kb]}"
+        local rate_kb_s="${RESYNC_STATUS_DATA[rate_kb_s]}"
         local elapsed_seconds="${RESYNC_STATUS_DATA[elapsed_seconds]}"
         local eta_seconds="${RESYNC_STATUS_DATA[eta_seconds]}"
 
         local elapsed_formatted=$(format_time_duration "$elapsed_seconds")
         local eta_formatted=$(format_time_duration "$eta_seconds")
+        local pos_kb_formatted=$(format_kbytes "$pos_kb" 1 2)
+        local size_kb_formatted=$(format_kbytes "$size_kb")
+        local rate_formatted=$(format_io_rate "$rate_kb_s" 0)
 
         echo ""
         echo -e "Operation     : ${BLUE}$friendly_action${NC}"
-        echo -e "Progress      : $progress% ($pos_gb/$size_gb GB)"
-        echo -e "Speed         : $rate_mb MB/s"
+        echo -e "Progress      : $progress% ($pos_kb_formatted / $size_kb_formatted)"
+        echo -e "Speed         : $rate_formatted"
         echo -e "Elapsed Time  : $elapsed_formatted"
         echo -e "ETA           : $eta_formatted"
     fi
@@ -1248,7 +1242,8 @@ format_prometheus_output() {
         echo ""
         echo "# HELP nonraid_resync_rate_mb_per_sec Current resync rate in MB/s"
         echo "# TYPE nonraid_resync_rate_mb_per_sec gauge"
-        echo "nonraid_resync_rate_mb_per_sec{label=\"$label\"} ${RESYNC_STATUS_DATA[rate_mb_s]}"
+        local rate_mb_numeric=$(format_kbytes "${RESYNC_STATUS_DATA[rate_kb_s]}" 0 2 "mb")
+        echo "nonraid_resync_rate_mb_per_sec{label=\"$label\"} $rate_mb_numeric"
 
         echo ""
         echo "# HELP nonraid_resync_eta_seconds Estimated time remaining for resync in seconds"
@@ -1352,7 +1347,8 @@ format_json_output() {
     echo "    \"progress_percent\": ${RESYNC_STATUS_DATA[progress_percent]},"
     echo "    \"position_gb\": ${RESYNC_STATUS_DATA[position_gb]},"
     echo "    \"size_gb\": ${RESYNC_STATUS_DATA[size_gb]},"
-    echo "    \"rate_mb_s\": ${RESYNC_STATUS_DATA[rate_mb_s]},"
+    local rate_mb_numeric=$(format_kbytes "${RESYNC_STATUS_DATA[rate_kb_s]}" 0 2 "mb")
+    echo "    \"rate_mb_s\": $rate_mb_numeric,"
     echo "    \"elapsed_seconds\": ${RESYNC_STATUS_DATA[elapsed_seconds]},"
     echo "    \"eta_seconds\": ${RESYNC_STATUS_DATA[eta_seconds]}"
     echo "  },"
@@ -1465,7 +1461,7 @@ format_disk_entry_data() {
 
     local size_display="$disksize"
     if [ "$VERBOSE" -eq 0 ]; then
-        size_display=$(format_bytes $(( disksize * 1024 )))
+        size_display=$(format_kbytes "$disksize")
     fi
 
     local diskname_display="${diskname:-$slot_display}"
@@ -1481,8 +1477,8 @@ format_disk_entry_data() {
     fi
 
     if [ "$array_started" = "true" ]; then
-        read_rate=$(format_rate_or_count "${DISK_STATUS_DATA[slot_${idx}_read_rate_scaled]:-0}" "slot_${idx}_reads")
-        write_rate=$(format_rate_or_count "${DISK_STATUS_DATA[slot_${idx}_write_rate_scaled]:-0}" "slot_${idx}_writes")
+        read_rate=$(format_rate_or_count "${DISK_STATUS_DATA[slot_${idx}_read_rate_kb_s]:-0}" "slot_${idx}_reads")
+        write_rate=$(format_rate_or_count "${DISK_STATUS_DATA[slot_${idx}_write_rate_kb_s]:-0}" "slot_${idx}_writes")
     fi
 
     echo "$idx|$slot_display|$status_formatted|$device|$size_display|$diskname_display|$fs_type|$mountpoint|$usage|$read_rate|$write_rate"
@@ -1572,9 +1568,9 @@ calculate_disk_io_rates() {
             if [ "${DISK_STATUS_DATA[slot_${idx}_present]}" = "true" ]; then
                 DISK_STATUS_DATA["slot_${idx}_prev_reads"]="${DISK_STATUS_DATA[slot_${idx}_reads]}"
                 DISK_STATUS_DATA["slot_${idx}_prev_writes"]="${DISK_STATUS_DATA[slot_${idx}_writes]}"
-                DISK_STATUS_DATA["slot_${idx}_read_rate_scaled"]="0"
-                DISK_STATUS_DATA["slot_${idx}_write_rate_scaled"]="0"
-                DISK_STATUS_DATA["slot_${idx}_total_rate_scaled"]="0"
+                DISK_STATUS_DATA["slot_${idx}_read_rate_kb_s"]="0"
+                DISK_STATUS_DATA["slot_${idx}_write_rate_kb_s"]="0"
+                DISK_STATUS_DATA["slot_${idx}_total_rate_kb_s"]="0"
             fi
         done
         DISK_STATUS_DATA["timestamp_prev"]="$current_timestamp"
@@ -1602,15 +1598,15 @@ calculate_disk_io_rates() {
             [ "$writes_delta" -lt 0 ] && writes_delta=0
 
             # Driver writes and reads are in 8-sector units = 4kB
-            # Convert to MB/s and multiply by 100 for two decimal place precision
-            local read_rate_scaled=$(( (reads_delta * 100) / (256 * time_diff) ))
-            local write_rate_scaled=$(( (writes_delta * 100) / (256 * time_diff) ))
-            local total_rate_scaled=$(( read_rate_scaled + write_rate_scaled ))
+            # Calculate rates in kB/s
+            local read_rate_kb_s=$(( (reads_delta * 4) / time_diff ))
+            local write_rate_kb_s=$(( (writes_delta * 4) / time_diff ))
+            local total_rate_kb_s=$(( read_rate_kb_s + write_rate_kb_s ))
 
             # Store calculated rates and raw values for next loop
-            DISK_STATUS_DATA["slot_${idx}_read_rate_scaled"]="$read_rate_scaled"
-            DISK_STATUS_DATA["slot_${idx}_write_rate_scaled"]="$write_rate_scaled"
-            DISK_STATUS_DATA["slot_${idx}_total_rate_scaled"]="$total_rate_scaled"
+            DISK_STATUS_DATA["slot_${idx}_read_rate_kb_s"]="$read_rate_kb_s"
+            DISK_STATUS_DATA["slot_${idx}_write_rate_kb_s"]="$write_rate_kb_s"
+            DISK_STATUS_DATA["slot_${idx}_total_rate_kb_s"]="$total_rate_kb_s"
             DISK_STATUS_DATA["slot_${idx}_prev_reads"]="$current_reads"
             DISK_STATUS_DATA["slot_${idx}_prev_writes"]="$current_writes"
         fi
@@ -1620,26 +1616,27 @@ calculate_disk_io_rates() {
 }
 
 format_rate_or_count() {
-    local rate_scaled="$1"
+    local rate_kb_s="$1"
     local count_key="$2"
 
-    if [ "$MONITOR_MODE" -eq 1 ] && [ "$rate_scaled" -gt 0 ]; then
-        format_io_rate "$rate_scaled"
+    if [ "$MONITOR_MODE" -eq 1 ] && [ "$rate_kb_s" -gt 0 ]; then
+        format_io_rate "$rate_kb_s"
     else
         format_io_count "${DISK_STATUS_DATA[$count_key]:-0}"
     fi
 }
 
 format_io_rate() {
-    # Input is scaled by 100 (e.g., 250 = 2.50 MB/s)
-    # Convert scaled value back to MB/s with 2 decimals
-    local rate_scaled="$1"
+    local rate_kb_s="$1"
+    local colorize="${2:-1}"
 
-    if [ "$rate_scaled" -gt 0 ]; then
-        local rate_int=$((rate_scaled / 100))
-        local rate_decimal=$((rate_scaled % 100))
-
-        printf "${GREEN}%d.%02d MB/s${NC}" "$rate_int" "$rate_decimal"
+    if [ "$rate_kb_s" -gt 0 ]; then
+        local formatted_rate=$(format_kbytes "$rate_kb_s" 1 2)
+        formatted_rate="${formatted_rate}/s"
+        if [ "$colorize" -eq 1 ]; then
+            formatted_rate="${GREEN}$formatted_rate${NC}"
+        fi
+        echo -e "$formatted_rate"
     else
         echo -n "-"
     fi
@@ -1649,53 +1646,64 @@ format_io_count() {
     # Format 4kB block counts as bytes with appropriate suffixes (B, kB, MB, GB, TB)
     local count="$1"
 
-    if [ "$count" -eq 0 ]; then
-        echo -n "-"
-        return
-    fi
-
-    # Convert 4kB blocks to bytes
-    local bytes=$((count * 4096))
-    format_bytes "$bytes"
+    # Convert 4kB blocks to kB
+    local kb=$((count * 4))
+    format_kbytes "$kb"
 }
 
-format_bytes() {
-    local bytes="$1"
+format_kbytes() {
+    local kb="$1"
+    local add_unit="${2:-1}"
+    local decimal_places="${3:-1}"
+    local force_unit="${4:-""}"
 
-    if [ "$bytes" -lt 1024 ]; then
-        printf "%dB" "$bytes"
-    elif [ "$bytes" -lt 1048576 ]; then  # 1024^2
-        local kb=$((bytes / 1024))
-        local remainder=$((bytes % 1024))
-        if [ "$remainder" -ge 102 ]; then  # Show decimal if > 0.1kB
-            printf "%d.%dkB" "$kb" $((remainder * 10 / 1024))
-        else
-            printf "%dkB" "$kb"
+    local unit=""
+    local bytes=$((kb * 1024))
+
+    # Helper function to format with decimals
+    format_with_decimals() {
+        local value="$1"
+        local remainder="$2"
+        local divisor="$3"
+        local unit_str="$4"
+        local decimals="$5"
+
+        # Calculate threshold for showing as integer (10% of divisor)
+        local threshold=$((divisor / 10))
+
+        if [ "$decimals" -eq 0 ] || [ "$remainder" -le "$threshold" ]; then
+            [ "$remainder" -ge $((divisor / 2)) ] && value=$((value + 1))
+            printf "%d%s" "$value" "$unit_str"
+        elif [ "$decimals" -eq 1 ]; then
+            local dec1=$((remainder * 10 / divisor))
+            printf "%d.%d%s" "$value" "$dec1" "$unit_str"
+        elif [ "$decimals" -eq 2 ]; then
+            local dec2=$((remainder * 100 / divisor))
+            printf "%d.%02d%s" "$value" "$dec2" "$unit_str"
         fi
-    elif [ "$bytes" -lt 1073741824 ]; then  # 1024^3
-        local mb=$((bytes / 1048576))
-        local remainder=$((bytes % 1048576))
-        if [ "$remainder" -ge 104857 ]; then  # Show decimal if > 0.1MB
-            printf "%d.%dMB" "$mb" $((remainder * 10 / 1048576))
-        else
-            printf "%dMB" "$mb"
-        fi
-    elif [ "$bytes" -lt 1099511627776 ]; then  # 1024^4
-        local gb=$((bytes / 1073741824))
-        local remainder=$((bytes % 1073741824))
-        if [ "$remainder" -ge 107374182 ]; then  # Show decimal if > 0.1GB
-            printf "%d.%dGB" "$gb" $((remainder * 10 / 1073741824))
-        else
-            printf "%dGB" "$gb"
-        fi
-    else
-        local tb=$((bytes / 1099511627776))
-        local remainder=$((bytes % 1099511627776))
-        if [ "$remainder" -ge 109951162777 ]; then  # Show decimal if > 0.1TB
-            printf "%d.%dTB" "$tb" $((remainder * 10 / 1099511627776))
-        else
-            printf "%dTB" "$tb"
-        fi
+    }
+
+    if [ "$force_unit" = "b" ] || { [ -z "$force_unit" ] && [ "$bytes" -lt 1024 ]; }; then
+        [ "$add_unit" -eq 1 ] && unit=" B"
+        printf "%d%s" "$bytes" "$unit"
+    elif [ "$force_unit" = "kb" ] || { [ -z "$force_unit" ] && [ "$kb" -lt 1024 ]; }; then
+        [ "$add_unit" -eq 1 ] && unit=" kB"
+        printf "%d%s" "$kb" "$unit"
+    elif [ "$force_unit" = "mb" ] || { [ -z "$force_unit" ] && [ "$kb" -lt 1048576 ]; }; then  # 1024^2
+        local mb=$((kb / 1024))
+        local remainder=$((kb % 1024))
+        [ "$add_unit" -eq 1 ] && unit=" MB"
+        format_with_decimals "$mb" "$remainder" "1024" "$unit" "$decimal_places"
+    elif [ "$force_unit" = "gb" ] || { [ -z "$force_unit" ] && [ "$kb" -lt 1073741824 ]; }; then  # 1024^3
+        local gb=$((kb / 1048576))
+        local remainder=$((kb % 1048576))
+        [ "$add_unit" -eq 1 ] && unit=" GB"
+        format_with_decimals "$gb" "$remainder" "1048576" "$unit" "$decimal_places"
+    elif [ "$force_unit" = "tb" ] || [ -z "$force_unit" ]; then
+        local tb=$((kb / 1073741824))
+        local remainder=$((kb % 1073741824))
+        [ "$add_unit" -eq 1 ] && unit=" TB"
+        format_with_decimals "$tb" "$remainder" "1073741824" "$unit" "$decimal_places"
     fi
 }
 
@@ -2664,7 +2672,7 @@ list_available_devices() {
             local size_kb=$(get_disk_size_kb "$partition")
             local size_gb=0
             if [ -n "$size_kb" ] && [ "$size_kb" -gt 0 ]; then
-                size_gb=$(convert_blocks_to_gb "$size_kb")
+                size_gb=$(format_kbytes "$size_kb" 0 0 "gb")
             fi
 
             # Add to available devices
@@ -3424,9 +3432,9 @@ unassign_disk() {
 
     # Calculate size in GB if available
     if [ -n "$disk_size" ] && [ "$disk_size" -gt 0 ]; then
-        size_gb=$(convert_blocks_to_gb "$disk_size")
+        size_gb=$(format_kbytes "$disk_size" 0 0 "gb")
     elif [ -n "$rdev_size" ] && [ "$rdev_size" -gt 0 ]; then
-        size_gb=$(convert_blocks_to_gb "$rdev_size")
+        size_gb=$(format_kbytes "$rdev_size" 0 0 "gb")
     fi
 
     # Format the slot name for display

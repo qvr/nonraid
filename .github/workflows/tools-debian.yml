@@ -101,7 +101,7 @@ jobs:
           cd tools
           rm -rf tests
           echo "::group::Build Debian Source Package"
-          git archive --format=tar.gz --prefix="nonraid-tools-${{ steps.get-nmdctl.outputs.version }}/" HEAD > "../nonraid-tools_${{ steps.get-nmdctl.outputs.version }}.orig.tar.gz" nmdctl systemd
+          git archive --format=tar.gz --prefix="nonraid-tools-${{ steps.get-nmdctl.outputs.version }}/" HEAD > "../nonraid-tools_${{ steps.get-nmdctl.outputs.version }}.orig.tar.gz" nmdctl systemd udev
           gpg --batch --passphrase-file <(cat <<<"${PPA_GPG_PASSPHRASE}") --import <(cat <<<"${PPA_GPG_KEY}")
           KEY_ID=$(gpg --list-secret-keys --with-colons | grep '^sec:' | cut -d: -f5 | head -1)
           debuild -S -i -sa -k"$KEY_ID" -p"gpg --batch --passphrase "$PPA_GPG_PASSPHRASE" --pinentry-mode loopback"

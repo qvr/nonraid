@@ -1470,7 +1470,7 @@ format_disk_entry_data() {
 
     local diskname_display="${diskname:-$slot_display}"
     local fs_type="${DISK_STATUS_DATA[slot_${idx}_fs_type]:-"-"}"
-    local mountpoint="${DISK_STATUS_DATA[slot_${idx}_mountpoint]:-"unmounted"}"
+    local mountpoint="${DISK_STATUS_DATA[slot_${idx}_mountpoint]:-"-"}"
     local usage="${DISK_STATUS_DATA[slot_${idx}_usage]:-"-"}"
     local read_rate=""
     local write_rate=""

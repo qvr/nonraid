@@ -998,13 +998,13 @@ format_human_disk_status() {
     disk_entries=($(get_disk_entries))
     IFS="$old_IFS"
 
-    local widths=(4 6 6 8)  # Minimum widths: Slot, Status, Device, Size
+    local widths=(4 6 6 4)  # Minimum widths: Slot, Status, Device, Size
     local headers=("Slot" "Status" "Device")
 
     if [ "$VERBOSE" -eq 1 ]; then
         headers+=("Size(1k)")
     else
-        headers+=("Size(GB)")
+        headers+=("Size")
     fi
 
     if [ "$array_started" = "true" ]; then
@@ -1436,7 +1436,6 @@ format_disk_entry_data() {
     local idx="$1"
     local slottype="${DISK_STATUS_DATA[slot_${idx}_type]}"
     local disksize="${DISK_STATUS_DATA[slot_${idx}_size_kb]}"
-    local sizegb="${DISK_STATUS_DATA[slot_${idx}_size_gb]}"
     local rdevname="${DISK_STATUS_DATA[slot_${idx}_device]}"
     local rdevstatus="${DISK_STATUS_DATA[slot_${idx}_status]}"
     local rdevnumerrors="${DISK_STATUS_DATA[slot_${idx}_errors]}"
@@ -1464,9 +1463,9 @@ format_disk_entry_data() {
         device="$diskid ($rdevname)"
     fi
 
-    local size_display="$sizegb"
-    if [ "$VERBOSE" -eq 1 ]; then
-        size_display="$disksize"
+    local size_display="$disksize"
+    if [ "$VERBOSE" -eq 0 ]; then
+        size_display=$(format_bytes $(( disksize * 1024 )))
     fi
 
     local diskname_display="${diskname:-$slot_display}"
@@ -1657,6 +1656,11 @@ format_io_count() {
 
     # Convert 4kB blocks to bytes
     local bytes=$((count * 4096))
+    format_bytes "$bytes"
+}
+
+format_bytes() {
+    local bytes="$1"
 
     if [ "$bytes" -lt 1024 ]; then
         printf "%dB" "$bytes"

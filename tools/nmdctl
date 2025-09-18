@@ -2039,6 +2039,11 @@ get_fs_usage() {
         return 0
     fi
 
+    # Opened luks device, get the upper fs type
+    if [[ "$fs_type" =~ ^luks\+.* ]]; then
+        fs_type=$(echo "$fs_type" | cut -d'+' -f2)
+    fi
+
     # Handle different filesystem types
     case "$fs_type" in
         "zfs")

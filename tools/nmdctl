@@ -1008,8 +1008,13 @@ format_human_disk_status() {
     fi
 
     if [ "$array_started" = "true" ]; then
-        headers+=("Disk Name" "FS" "Mountpoint" "Usage")
-        widths+=(9 2 10 5)
+        if [ "$VERBOSE" -eq 1 ]; then
+            headers+=("Disk Name")
+            widths+=(9)
+        fi
+
+        headers+=("FS" "Mountpoint" "Usage")
+        widths+=(2 10 5)
 
         headers+=("Reads" "Writes")
         widths+=(5 6)
@@ -1032,23 +1037,32 @@ format_human_disk_status() {
         [ "$size_len" -gt "${widths[3]}" ] && widths[3]=$size_len
 
         if [ "$array_started" = "true" ]; then
-            local diskname_len=${#diskname}
-            [ "$diskname_len" -gt "${widths[4]}" ] && widths[4]=$diskname_len
+            local col_index=4
+
+            if [ "$VERBOSE" -eq 1 ]; then
+                local diskname_len=${#diskname}
+                [ "$diskname_len" -gt "${widths[4]}" ] && widths[4]=$diskname_len
+                col_index=5
+            fi
 
             local fs_len=${#fs}
-            [ "$fs_len" -gt "${widths[5]}" ] && widths[5]=$fs_len
+            [ "$fs_len" -gt "${widths[col_index]}" ] && widths[col_index]=$fs_len
+            ((col_index++))
 
             local mountpoint_len=${#mountpoint}
-            [ "$mountpoint_len" -gt "${widths[6]}" ] && widths[6]=$mountpoint_len
+            [ "$mountpoint_len" -gt "${widths[col_index]}" ] && widths[col_index]=$mountpoint_len
+            ((col_index++))
 
             local usage_len=${#usage}
-            [ "$usage_len" -gt "${widths[7]}" ] && widths[7]=$usage_len
+            [ "$usage_len" -gt "${widths[col_index]}" ] && widths[col_index]=$usage_len
+            ((col_index++))
 
             local read_len=$(get_visible_length "$read_rate")
-            [ "$read_len" -gt "${widths[8]}" ] && widths[8]=$read_len
+            [ "$read_len" -gt "${widths[col_index]}" ] && widths[col_index]=$read_len
+            ((col_index++))
 
             local write_len=$(get_visible_length "$write_rate")
-            [ "$write_len" -gt "${widths[9]}" ] && widths[9]=$write_len
+            [ "$write_len" -gt "${widths[col_index]}" ] && widths[col_index]=$write_len
         fi
     done
 
@@ -1097,18 +1111,28 @@ format_disk_entry_line() {
     printf "  %-*s" "${widths[3]}" "$size"
 
     if [ "$array_started" = "true" ]; then
-        printf "  %-*s" "${widths[4]}" "$diskname"
-        printf "  %-*s" "${widths[5]}" "$fs"
-        printf "  %-*s" "${widths[6]}" "$mountpoint"
-        printf "  %-*s" "${widths[7]}" "$usage"
+        local col_index=4
+
+        if [ "$VERBOSE" -eq 1 ]; then
+            printf "  %-*s" "${widths[4]}" "$diskname"
+            col_index=5
+        fi
+
+        printf "  %-*s" "${widths[col_index]}" "$fs"
+        ((col_index++))
+        printf "  %-*s" "${widths[col_index]}" "$mountpoint"
+        ((col_index++))
+        printf "  %-*s" "${widths[col_index]}" "$usage"
+        ((col_index++))
 
         local read_visible_length=$(get_visible_length "$read_rate")
         printf "  %s" "$read_rate"
-        printf "%*s" "$((widths[8] - read_visible_length))" ""
+        printf "%*s" "$((widths[col_index] - read_visible_length))" ""
+        ((col_index++))
 
         local write_visible_length=$(get_visible_length "$write_rate")
         printf "  %s" "$write_rate"
-        printf "%*s" "$((widths[9] - write_visible_length))" ""
+        printf "%*s" "$((widths[col_index] - write_visible_length))" ""
     fi
 
     printf "\n"

@@ -2007,8 +2007,8 @@ get_mountpoint() {
     # Handle different filesystem types
     case "$fs_type" in
         luks\+*)
-            # For LUKS, we need to check the underlying filesystem
-            local luks_fs=$(echo "$fs_type" | cut -d'+' -f2)
+            # For LUKS, we need to check the upper filesystem
+            local luks_fs=${fs_type##*+}
             if [ -n "$luks_fs" ]; then
                 mountpoint=$(get_mountpoint "/dev/mapper/$device" "$luks_fs")
             fi
@@ -2077,7 +2077,7 @@ get_fs_usage() {
 
     # Opened luks device, get the upper fs type
     if [[ "$fs_type" =~ ^luks\+.* ]]; then
-        fs_type=$(echo "$fs_type" | cut -d'+' -f2)
+        fs_type=${fs_type##*+}
     fi
 
     # Handle different filesystem types
@@ -3723,7 +3723,7 @@ mount_array_disks() {
         fi
         # Opened luks device, mount the filesystem
         if [[ "$fs_type" =~ ^luks\+.* ]]; then
-            fs_type=$(echo "$fs_type" | cut -d'+' -f2)
+            fs_type=${fs_type##*+}
             device="/dev/mapper/$diskname"
         fi
 
@@ -3857,7 +3857,7 @@ unmount_array_disks() {
 
         local luks_fs=0
         if [[ "$fs_type" =~ ^luks\+.* ]]; then
-            fs_type=$(echo "$fs_type" | cut -d'+' -f2)
+            fs_type=${fs_type##*+}
             luks_fs=1
         fi
 

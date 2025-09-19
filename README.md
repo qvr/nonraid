@@ -65,9 +65,6 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 
 The supported kernel version ranges might be inaccurate, the driver has been tested to work on **Ubuntu 24.04 LTS** GA kernel (6.8.0) and HWE kernels (6.11 and 6.14), on **Debian 12** (6.1) and on **Debian 13** (6.12). Note that kernel versions 6.9 and 6.10 are not supported. You can report other distributions and kernel versions that work in the [discussions](https://github.com/qvr/nonraid/discussions).
 
-> [!NOTE]
-> Ubuntu 24.04 LTS HWE kernel users should be aware that future HWE kernel version changes might include kernel API changes that could cause the driver to stop working until an update is released.
-
 ## Installation
 
 For Ubuntu/Debian based systems, you can install NonRAID through the PPA repository or by downloading the packages directly.

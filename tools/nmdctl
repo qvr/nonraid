@@ -2784,6 +2784,7 @@ create_array() {
 
     local assigned_slots=()
     local assigned_count=0
+    local import_entries=()
 
     # Display available slots explanation
     echo -e "${BLUE}Slot Assignment Guidelines:${NC}"
@@ -2905,17 +2906,10 @@ create_array() {
                     continue
                 fi
 
-                # Import disk to slot
-                echo -e "Importing disk to slot $slot: ${BLUE}$(basename "$partition")${NC}"
-
-                # Import disk: slot, partition, offset, size, erased, id
-                if ! run_nmd_command "import $slot $(basename "$partition") 0 $size_kb 0 $disk_id"; then
-                    echo -e "${RED}Error: Failed to import disk to slot $slot${NC}"
-                else
-                    echo -e "${GREEN}Successfully imported disk to slot $slot${NC}"
-                    assigned_slots+=("$slot")
-                    assigned_count=$((assigned_count + 1))
-                fi
+                echo -e "Assigning disk for slot $slot: ${BLUE}$(basename "$partition")${NC}"
+                import_entries+=("$slot|$partition|$size_kb|$disk_id")
+                assigned_slots+=("$slot")
+                assigned_count=$((assigned_count + 1))
                 break
             fi
         done
@@ -2929,7 +2923,38 @@ create_array() {
         return 0
     fi
 
-    echo -e "${GREEN}Successfully assigned $assigned_count disk(s) to the array${NC}"
+    echo -e "${GREEN}Assigned $assigned_count disk(s) to the array${NC}"
+
+    # Now import all disks in slot order
+    if [ ${#import_entries[@]} -gt 0 ]; then
+        echo ""
+        echo -e "${BLUE}Importing disks in slot order...${NC}"
+
+        # Sort by slot number
+        local old_IFS=$IFS
+        IFS=$'\n' sorted_entries=($(printf '%s\n' "${import_entries[@]}" | sort -t'|' -k1,1n))
+        IFS=$old_IFS
+
+        local import_failed=0
+        for entry in "${sorted_entries[@]}"; do
+            IFS='|' read -r slot partition size_kb disk_id <<< "$entry"
+
+            echo -e "Importing disk to slot $slot: ${BLUE}$(basename "$partition")${NC}"
+
+            if ! run_nmd_command "import $slot $(basename "$partition") 0 $size_kb 0 $disk_id"; then
+                echo -e "${RED}Error: Failed to import disk to slot $slot${NC}"
+                import_failed=1
+            else
+                echo -e "${GREEN}Successfully imported disk to slot $slot${NC}"
+            fi
+        done
+
+        if [ "$import_failed" -eq 1 ]; then
+            echo -e "${YELLOW}Some disk imports failed. Check the output above.${NC}"
+        else
+            echo -e "${GREEN}All disks imported successfully${NC}"
+        fi
+    fi
 
     # Now set the array label if provided
     if [ -n "$array_label" ]; then

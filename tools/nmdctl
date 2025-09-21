@@ -2700,7 +2700,6 @@ create_array() {
     local superblock="${SUPERBLOCK_PATH:-$DEFAULT_SUPERBLOCK}"
     local is_new_superblock=0
     local do_new_config=0
-    local do_parity_skip=0
 
     # Check if this will be a new superblock
     if [ ! -f "$superblock" ]; then
@@ -2947,7 +2946,6 @@ create_array() {
         read -r -p "Is the array parity already valid? (y/N): " parity_valid
         if [[ "$parity_valid" =~ ^[Yy]$ ]]; then
             echo -e "${YELLOW}Marking parity valid for the next array start.${NC}"
-            do_parity_skip=1
             local invalidslot="98"
             # mark Q valid only if it is still in the array
             if [[ " ${assigned_slots[*]} " =~ " 29 " ]]; then
@@ -2976,16 +2974,23 @@ create_array() {
     else
         echo -e "${YELLOW}Array creation complete. You can start it with: ${GREEN}nmdctl start${NC}"
     fi
-    # XXX: FIXME: driver internal state gets inconsistent after creating a new array
-    # XXX: FIXME: need to reload the module to reset internal state
-    echo ""
-    echo -e "${YELLOW}Note: You may need to reload the module to reset the internal state"
-    if [ "$do_parity_skip" -eq 1 ]; then
-        echo -e "if after array start the array state is still DEGRADED.${NC}"
-    else
-        echo -e "if after parity reconstruction the array state is still DEGRADED.${NC}"
+
+    if [ "$do_new_config" -eq 0 ]; then
+        echo ""
+        echo -e "${YELLOW}Next you may proceed with creating filesystems on the data disk(s).${NC}"
+        echo ""
+        echo -e "${YELLOW}For example to create a filesystem on the first data disk:${NC}"
+        echo -e "  ${GREEN}mkfs.xfs /dev/nmd1p1${NC}            - Create XFS filesystem"
+        echo -e "  ${GREEN}zpool create disk1 /dev/nmd1p1${NC}  - Create ZFS filesystem (use diskN as the pool name)"
+        echo -e "  ${GREEN}mkfs.btrfs /dev/nmd1p1${NC}          - Create Btrfs filesystem"
+        echo -e "${YELLOW}Replace nmd1p1 with the appropriate data disk slot.${NC}"
+        echo ""
+        echo -e "${YELLOW}If you want encryption, create a LUKS container first and use the mapped device instead.${NC}"
+        echo -e "  ${GREEN}cryptsetup luksFormat /dev/nmd1p1${NC}"
+        echo -e "  ${GREEN}cryptsetup open /dev/nmd1p1 nmd1p1${NC} (use the NonRAID device name as the mapped name)"
+        echo -e "  ${GREEN}mkfs.xfs /dev/mapper/nmd1p1${NC} (or any other filesystem)"
     fi
-    echo -e "${YELLOW}Use: ${GREEN}nmdctl reload${NC}"
+
     return 0
 }
 

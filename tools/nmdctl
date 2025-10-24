@@ -2659,8 +2659,17 @@ handle_check() {
 list_available_devices() {
     local devices=()
 
+    # Find system virtio devices
+    virtio_majors=$(grep virtblk /proc/devices | awk '{print $1}')
+
+    # Include SCSI/SATA in disk devices
+    include_majors="8"
+    for major in $virtio_majors; do
+        include_majors+=",$major"
+    done
+
     # Find all disk devices
-    for dev in $(lsblk -n -d -I 8 -o path 2>/dev/null); do
+    for dev in $(lsblk -n -d -I "$include_majors" -o path 2>/dev/null); do
         # Find partition, largest on the disk and must not be mounted
         local partition=$(find_partition "$dev")
         if [ -n "$partition" ]; then

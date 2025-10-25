@@ -133,13 +133,11 @@ jobs:
           echo "Get disk size with nmdctl get_disk_size_kb"
           size=$(sudo bash -c "source tools/nmdctl; get_disk_size_kb ${DISK1}p1")
 
-          # Import disks to the array
-          echo "Importing disks to NonRAID array..."
-          echo "import 0 $(basename $DISK1)p1 0 $size 0 $(basename $DISK1)" | sudo tee /proc/nmdcmd
-          echo "import 1 $(basename $DISK2)p1 0 $size 0 $(basename $DISK2)" | sudo tee /proc/nmdcmd
-          echo "import 2 $(basename $DISK3)p1 0 $size 0 $(basename $DISK3)" | sudo tee /proc/nmdcmd
+          # Create array using nmdctl with parametric mode
+          echo "Creating NonRAID array with nmdctl..."
+          sudo bash tools/nmdctl create --force P:${DISK1}p1:$(basename $DISK1) 1:${DISK2}p1:$(basename $DISK2) 2:${DISK3}p1:$(basename $DISK3)
 
-          sleep 2 # Give imports time to process
+          sleep 2 # Give array creation time to process
 
           # Check initial status
           echo "Initial Status:"

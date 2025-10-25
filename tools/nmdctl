@@ -68,6 +68,9 @@ Status and monitoring command:
 
 Array Management Commands:
     create                          Create a new array with interactive disk assignment
+    create [-f] [SLOT:DEV[:ID] ..]  Create a new array with layout directly as arguments
+                                    Example: nmdctl create P:/dev/sdb1 1:/dev/sdc1 2:/dev/sdd1 ...
+                                    Options: -f, --force: Skip device availability checks, allow any block device
     start                           Start the array
     stop                            Stop the array
     import                          Import all disks to the array without starting it
@@ -2655,6 +2658,45 @@ handle_check() {
     return 0
 }
 
+# Validate if a device/partition path is available for array use
+validate_device_path() {
+    local device_path="$1"
+    local force="${2:-0}"
+    local available_devices_str="$3"
+
+    # Check if device path exists
+    if [ ! -e "$device_path" ]; then
+        echo -e "${RED}Error: Device $device_path does not exist${NC}"
+        return 1
+    fi
+
+    # Check if it's a block device
+    if [ ! -b "$device_path" ]; then
+        echo -e "${RED}Error: $device_path is not a block device${NC}"
+        return 1
+    fi
+
+    # If --force is not used, verify device is in available devices list
+    if [ "$force" -eq 0 ]; then
+        local device_found=0
+        for device_info in $available_devices_str; do
+            IFS='|' read -r dev partition size_kb size_gb disk_id <<< "$device_info"
+            if [ "$partition" = "$device_path" ]; then
+                device_found=1
+                break
+            fi
+        done
+
+        if [ "$device_found" -eq 0 ]; then
+            echo -e "${RED}Error: Device $device_path is not in the list of available devices${NC}"
+            echo -e "${YELLOW}Use --force to override this check${NC}"
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
 # List available block devices with an unused largest partition
 list_available_devices() {
     local devices=()
@@ -2692,10 +2734,235 @@ list_available_devices() {
     echo "${devices[@]}"
 }
 
-# Create a new array with interactive disk assignment
+# Create a new array with interactive disk assignment or from layout parameters
 create_array() {
     check_root
 
+    # Parse arguments for layout mode or use interactive mode
+    local force=0
+    local -a disk_params
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            "--force"|"-f")
+                force=1
+                shift
+                ;;
+            *)
+                # Collect disk parameters
+                disk_params+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    # If disk parameters were provided, use layout mode
+    if [ ${#disk_params[@]} -gt 0 ]; then
+        create_array_layout "${force}" "${disk_params[@]}"
+        return $?
+    fi
+
+    # Otherwise, use interactive mode
+    create_array_interactive
+}
+
+# Create a new array from layout parameters
+create_array_layout() {
+    local force="$1"
+    shift
+    local disk_params=("$@")
+
+    # Get current superblock path
+    local superblock="${SUPERBLOCK_PATH:-$DEFAULT_SUPERBLOCK}"
+    local is_new_superblock=0
+    if [ ! -f "$superblock" ]; then
+        is_new_superblock=1
+        echo -e "${BLUE}Creating a new array with a new superblock at: ${GREEN}$superblock${NC}"
+        echo -e "${YELLOW}Note: The superblock file will be created when the array is started${NC}"
+    fi
+
+    # Check if module is loaded
+    if ! check_module_loaded; then
+        return 1
+    fi
+
+    # Check if /proc/nmdstat exists
+    if ! check_nmdstat_exists; then
+        return 1
+    fi
+
+    # Check if the array is already started
+    local mdstate=$(get_nmdstat_value "mdState")
+    if [ "$mdstate" != "STOPPED" ]; then
+        echo -e "${RED}Error: The array is not currently stopped. Please stop it first.${NC}"
+        return 1
+    fi
+
+    # Verify no disks are defined in the array
+    local disk_count=$(get_defined_slots_count)
+    if [ "$disk_count" -gt 0 ] && [ "$is_new_superblock" -eq 0 ]; then
+        echo -e "${RED}Error: The array already has $disk_count disk(s) configured${NC}"
+        echo -e "${YELLOW}Use 'nmdctl stop' first, then create a new superblock to replace the existing configuration.${NC}"
+        return 1
+    fi
+
+    echo -e "=== ${BLUE}Creating NonRAID Array (Non-interactive Mode)${NC} ==="
+    echo ""
+    echo -e "${YELLOW}Validating given array layout...${NC}"
+    echo ""
+
+    # Pre-fetch available devices once if not using --force
+    local cached_available_devices=""
+    if [ "$force" -eq 0 ]; then
+        cached_available_devices=$(list_available_devices)
+    fi
+
+
+    # Parse and validate disk parameters
+    local import_entries=()
+    local assigned_slots=()
+    local -A slot_map
+
+    for param in "${disk_params[@]}"; do
+        # Parse SLOT:DEVICE[:ID-STRING] format
+        local slot_spec="" device_path="" provided_disk_id=""
+
+        # Check basic format: must have at least one colon and valid slot
+        if [[ ! "$param" =~ ^([0-9P-Q]|[12][0-9]|29):.*$ ]]; then
+            echo -e "${RED}Error: Invalid format for parameter: $param${NC}"
+            echo -e "${YELLOW}Expected format: SLOT:/dev/partition or SLOT:/dev/partition:ID-STRING${NC}"
+            return 1
+        fi
+
+        # Parse the slot (first part before first colon)
+        slot_spec="${param%%:*}"
+        local rest="${param#*:}"
+
+        # Now parse the device path and optional ID from rest
+        if [[ "$rest" =~ ^([^:]+):(.+)$ ]]; then
+            # device:ID
+            device_path="${BASH_REMATCH[1]}"
+            provided_disk_id="${BASH_REMATCH[2]}"
+        else
+            # just device
+            device_path="$rest"
+        fi
+
+        # Validate device path is not empty
+        if [ -z "$device_path" ]; then
+            echo -e "${RED}Error: Empty device path in parameter: $param${NC}"
+            return 1
+        fi
+
+        # Convert slot specification to number
+        local slot=""
+        case "$slot_spec" in
+            [Pp])
+                slot="0"
+                ;;
+            [Qq])
+                slot="29"
+                ;;
+            *)
+                slot="$slot_spec"
+                # Validate slot number is 0-29
+                if [ "$slot" -lt 0 ] || [ "$slot" -gt 29 ]; then
+                    echo -e "${RED}Error: Invalid slot number: $slot (must be 0-29, P, or Q)${NC}"
+                    return 1
+                fi
+                ;;
+        esac
+
+        # Check for duplicate slot assignments
+        if [ -n "${slot_map[$slot]}" ]; then
+            echo -e "${RED}Error: Slot $slot specified multiple times${NC}"
+            return 1
+        fi
+        slot_map[$slot]=1
+
+        # Validate device path (pass cached available devices if available)
+        if ! validate_device_path "$device_path" "$force" "$cached_available_devices"; then
+            return 1
+        fi
+
+        # Get disk ID
+        local disk_id=""
+        if [ -n "$provided_disk_id" ]; then
+            # Use provided disk ID directly
+            disk_id="$provided_disk_id"
+        else
+            if [ -b "$device_path" ] || [ -e "$device_path" ]; then
+                local parent_dev=$(lsblk -n -p "$device_path" -o PKNAME 2>/dev/null | head -1)
+                if [ -z "$parent_dev" ]; then
+                    parent_dev="$device_path"
+                fi
+                disk_id=$(udevadm info --query=property --property=ID_SERIAL --value --name="$parent_dev" 2>/dev/null)
+            fi
+        fi
+
+        # Verify we have a disk ID
+        if [ -z "$disk_id" ]; then
+            echo -e "${RED}Error: Could not determine disk ID for $device_path${NC}"
+            echo -e "${YELLOW}You may provide disk ID manually using format: $slot_spec:$device_path:DISK-ID${NC}"
+            return 1
+        fi
+
+        # Get disk size
+        local size_kb=$(get_disk_size_kb "$device_path")
+        if [ -z "$size_kb" ] || [ "$size_kb" -le 0 ]; then
+            echo -e "${RED}Error: Could not determine size for $device_path${NC}"
+            return 1
+        fi
+
+        echo -e "Slot ${BLUE}$slot${NC}: ${BLUE}$(basename "$device_path")${NC} ($(format_kbytes "$size_kb" 0 0 "gb") GB) ID: $disk_id"
+
+        import_entries+=("$slot|$device_path|$size_kb|$disk_id")
+        assigned_slots+=("$slot")
+    done
+
+    echo ""
+
+    echo -e "${GREEN}Array layout validated successfully${NC}"
+    echo ""
+
+    # Import all disks in slot order
+    echo -e "${BLUE}Importing disks in slot order...${NC}"
+
+    # Sort by slot number
+    local old_IFS=$IFS
+    IFS=$'\n' sorted_entries=($(printf '%s\n' "${import_entries[@]}" | sort -t'|' -k1,1n))
+    IFS=$old_IFS
+
+    local import_failed=0
+    for entry in "${sorted_entries[@]}"; do
+        IFS='|' read -r slot device_path size_kb disk_id <<< "$entry"
+
+        echo -e "Importing disk to slot $slot: ${BLUE}$(basename "$device_path")${NC}"
+
+        if ! run_nmd_command "import $slot $(basename "$device_path") 0 $size_kb 0 $disk_id"; then
+            echo -e "${RED}Error: Failed to import disk to slot $slot${NC}"
+            import_failed=1
+        else
+            echo -e "${GREEN}Successfully imported disk to slot $slot${NC}"
+        fi
+    done
+
+    if [ "$import_failed" -eq 1 ]; then
+        echo -e "${RED}Array creation failed. Some disk imports failed.${NC}"
+        return 1
+    fi
+
+    echo -e "${GREEN}All disks imported successfully${NC}"
+    echo ""
+
+    # Show array status
+    show_status
+
+    return 0
+}
+
+# Interactive array creation mode
+create_array_interactive() {
     # Get current superblock path
     local superblock="${SUPERBLOCK_PATH:-$DEFAULT_SUPERBLOCK}"
     local is_new_superblock=0
@@ -4251,7 +4518,7 @@ main() {
             show_status "$@"
             ;;
         "create")
-            create_array
+            create_array "$@"
             ;;
         "start")
             start_array

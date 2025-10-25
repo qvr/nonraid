@@ -66,6 +66,9 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Build Debian Binary Package"
+          # Workaround for slow dpkg-genbuildinfo on GitHub Actions runners
+          # https://github.com/actions/runner-images/issues/13150
+          sudo mv /usr/local{,_}
           dpkg-buildpackage -b -rfakeroot -us -uc
           echo "::endgroup::"
 

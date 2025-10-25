@@ -57,6 +57,9 @@ jobs:
            -- Matti Hiljanen <matti@hiljanen.com>  $(date -R)
           EOF
 
+          # Workaround for slow dpkg-genbuildinfo on GitHub Actions runners
+          # https://github.com/actions/runner-images/issues/13150
+          sudo mv /usr/local{,_}
           make clean package
 
       - name: Workaround actions/upload-artifact#176

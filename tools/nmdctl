@@ -34,6 +34,7 @@ LUKS_KEYFILE="/etc/nonraid/luks-keyfile"
 # verbose, unattended
 VERBOSE=0
 UNATTENDED=0
+AUTO_YES=0
 # status modes
 NO_FS=0
 MONITOR_MODE=0
@@ -96,6 +97,7 @@ Global Options:
     -s, --super PATH                Superblock file path (default: ${DEFAULT_SUPERBLOCK})
     -k, --keyfile PATH              LUKS keyfile path (default: ${LUKS_KEYFILE})
     -u, --unattended                Enable unattended mode
+    -y, --yes                       Auto accept all prompts (DANGEROUS)
     --no-color                      Disable colored output
     -v, --verbose                   Enable verbose output
     -V, --version                   Display version information
@@ -2276,19 +2278,24 @@ import_disks() {
                         echo -e "  Partition size: $disk_size KB"
                         echo -e "  Expected size : $configured_size KB"
 
-                        if [ "$UNATTENDED" -eq 1 ]; then
+                        if [[ "$UNATTENDED" -eq 1 && "$AUTO_YES" -ne 1 ]]; then
                             # If unattended, do not continue import
                             echo -e "${RED}Error: Size mismatch for disk in slot $slot (unattended mode)${NC}"
                             continue
                         fi
 
                         # Ask for confirmation
-                        read -r -p "Use the configured size instead of detected size? (y/N): " confirm
-                        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                        if [[ "$AUTO_YES" -eq 1 ]]; then
                             size_to_use="$configured_size"
-                            echo -e "Using configured size: ${BLUE}$configured_size KB${NC}"
+                            echo -e "Using configured size automatically: ${BLUE}$configured_size KB${NC}"
                         else
-                            echo -e "Using detected partition size: ${BLUE}$disk_size KB${NC}"
+                            read -r -p "Use the configured size instead of detected size? (y/N): " confirm
+                            if [[ "$confirm" =~ ^[Yy]$ ]]; then
+                                size_to_use="$configured_size"
+                                echo -e "Using configured size: ${BLUE}$configured_size KB${NC}"
+                            else
+                                echo -e "Using detected partition size: ${BLUE}$disk_size KB${NC}"
+                            fi
                         fi
                     fi
 
@@ -2452,13 +2459,17 @@ start_array() {
                 ;;
         esac
 
-        if [ "$UNATTENDED" -eq 1 ]; then
+        if [[ "$UNATTENDED" -eq 1 && "$AUTO_YES" -ne 1 ]]; then
             echo -e "${RED}Error: Cannot start array in abnormal state in unattended mode${NC}"
             return 1
         fi
 
-        # Ask for confirmation
-        read -r -p "Do you want to continue starting the array in this state? (y/N): " confirm
+        if [[ "$AUTO_YES" -eq 1 ]]; then
+            confirm='y'
+        else
+            # Ask for confirmation
+            read -r -p "Do you want to continue starting the array in this state? (y/N): " confirm
+        fi
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             echo "Proceeding with array start in $mdstate state"
             if ! run_nmd_command "start $mdstate"; then
@@ -2516,13 +2527,18 @@ stop_array() {
     done
 
     if [ "$unmount_needed" -eq 1 ]; then
-        if [ "$UNATTENDED" -eq 1 ]; then
+        if [[ "$UNATTENDED" -eq 1 && "$AUTO_YES" -ne 1 ]]; then
             echo -e "${RED}Error: Cannot stop array with mounted filesystems in unattended mode${NC}"
             return 1
         fi
 
-        echo -e "${YELLOW}Warning: Some filesystems are mounted. Unmount them before stopping the array.${NC}"
-        read -r -p "Do you want to unmount all filesystems? (y/N): " confirm
+        if [[ "$AUTO_YES" -eq 1 ]]; then
+            confirm='y'
+            echo -e "${YELLOW}Warning: Some filesystems are mounted. Unmounting them before stopping the array.${NC}"
+        else
+            echo -e "${YELLOW}Warning: Some filesystems are mounted. Unmount them before stopping the array.${NC}"
+            read -r -p "Do you want to unmount all filesystems? (y/N): " confirm
+        fi
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             echo "Array stop cancelled by user"
             return 1
@@ -2610,8 +2626,12 @@ handle_check() {
     # Check if a previous resync operation is paused, and we were not called with resume
     if [[ "$mdresync" -eq 0 ]] && [[ "$mdresyncpos" -gt 0 ]] && [[ "${option^^}" != "RESUME" ]]; then
         echo -e "${YELLOW}Warning: Previous resync operation $friendly_action is currently paused at $(( mdresyncpos * 100 / mdresyncsize ))%${NC}"
-        echo -e "${YELLOW}You can resume it with ${GREEN}nmdctl check RESUME${NC}"
-        read -r -p "Are you sure you want to start a new operation without resuming? (y/N): " confirm
+        if [[ "$AUTO_YES" -eq 1 ]]; then
+            confirm='y'
+        else
+            echo -e "${YELLOW}You can resume it with ${GREEN}nmdctl check RESUME${NC}"
+            read -r -p "Are you sure you want to start a new operation without resuming? (y/N): " confirm
+        fi
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             echo "Parity check cancelled by user"
             return 1
@@ -2620,12 +2640,17 @@ handle_check() {
     # Check if some other sync operation is pending, and confirm with the user
     if [[ "$mdresyncaction" != check* ]]; then
         echo -e "${YELLOW}Warning: A sync operation other than parity check is pending: $friendly_action${NC}"
-        if [ "$UNATTENDED" -eq 1 ]; then
+        if [[ "$UNATTENDED" -eq 1 && "$AUTO_YES" -ne 1 ]]; then
             echo -e "${RED}Error: Cannot start parity check with another sync operation pending (unattended mode)${NC}"
             return 1
         fi
 
-        read -r -p "Do you want to proceed with $friendly_action? (y/N): " confirm
+        if [[ "$AUTO_YES" -eq 1 ]]; then
+            confirm='y'
+            echo -e "Proceeding with $friendly_action"
+        else
+            read -r -p "Do you want to proceed with $friendly_action? (y/N): " confirm
+        fi
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             echo "Sync operation cancelled by user"
             return 1
@@ -2636,7 +2661,11 @@ handle_check() {
             option="NOCORRECT"
         elif [ -z "$1" ]; then
             echo -e "${YELLOW}No option provided, defaulting to corrective parity check${NC}"
-            read -r -p "Do you want to continue? (y/N): " confirm
+            if [[ "$AUTO_YES" -eq 1 ]]; then
+                confirm='y'
+            else
+                read -r -p "Do you want to continue? (y/N): " confirm
+            fi
             if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
                 echo "Parity check cancelled by user"
                 return 1
@@ -2997,7 +3026,12 @@ create_array_interactive() {
     if [ "$disk_count" -gt 0 ] && [ "$is_new_superblock" -eq 0 ]; then
         echo -e "${YELLOW}Warning: The array already has $disk_count disk(s) configured${NC}"
         echo ""
-        read -r -p "Do you want to recreate the current array with a new config? [y/N]: " response
+
+        if [[ "$AUTO_YES" -eq 1 ]]; then
+            response='y'
+        else
+            read -r -p "Do you want to recreate the current array with a new config? [y/N]: " response
+        fi
         if [[ "$response" =~ ^[Yy]$ ]]; then
             get_all_nmdstat_values NMDSTAT_VALUES
             do_new_config=1
@@ -3235,7 +3269,12 @@ create_array_interactive() {
         echo "This avoids parity reconstruction when starting the array."
         echo ""
         echo -e "Only do this if you are SURE the ${YELLOW}parity is already valid.${NC}"
-        read -r -p "Is the array parity already valid? (y/N): " parity_valid
+        if [[ "$AUTO_YES" -eq 1 ]]; then
+            parity_valid='y'
+            echo -e "${YELLOW}Assuming parity is already valid!${NC}"
+        else
+            read -r -p "Is the array parity already valid? (y/N): " parity_valid
+        fi
         if [[ "$parity_valid" =~ ^[Yy]$ ]]; then
             echo -e "${YELLOW}Marking parity valid for the next array start.${NC}"
             local invalidslot="98"
@@ -3260,7 +3299,11 @@ create_array_interactive() {
 
     # Ask if user wants to start the array now
     echo ""
-    read -r -p "Do you want to start the array now? (y/N): " start_now
+    if [[ "$AUTO_YES" -eq 1 ]]; then
+        start_now='y'
+    else
+        read -r -p "Do you want to start the array now? (y/N): " start_now
+    fi
     if [[ "$start_now" =~ ^[Yy]$ ]]; then
         start_array
     else
@@ -3603,7 +3646,11 @@ add_disk() {
         echo ""
         echo -e "${YELLOW}You can pre-clear the disk with: ${GREEN}dd if=/dev/zero of=$selected_partition bs=1M status=progress${NC}"
         echo ""
-        read -r -p "Has the disk been pre-cleared? (y/N): " preclear
+        if [[ "$AUTO_YES" -eq 1 ]]; then
+            preclear='y'
+        else
+            read -r -p "Has the disk been pre-cleared? (y/N): " preclear
+        fi
         if [[ "$preclear" =~ ^[Yy]$ ]]; then
             preclear_done=1
             echo -e "${YELLOW}The disk will be marked as ${RED}pre-cleared.${NC}"
@@ -3615,8 +3662,11 @@ add_disk() {
 
     # Confirm selection
     echo -e "You are about to ${YELLOW}$verb${NC}: ${YELLOW}$(basename "$selected_dev")${NC} to slot ${YELLOW}$slot_display${NC}"
-    read -r -p "Proceed with the operation? (y/N): " confirm
-
+    if [[ "$AUTO_YES" -eq 1 ]]; then
+        confirm='y'
+    else
+        read -r -p "Proceed with the operation? (y/N): " confirm
+    fi
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         echo "Operation cancelled."
         return 0
@@ -3785,7 +3835,11 @@ unassign_disk() {
         echo ""
 
         # Ask for confirmation
-        read -r -p "Are you sure you want to unassign this disk? (y/N): " confirm
+        if [[ "$AUTO_YES" -eq 1 ]]; then
+            confirm='y'
+        else
+            read -r -p "Are you sure you want to unassign this disk? (y/N): " confirm
+        fi
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             echo "Operation cancelled."
             return 1
@@ -3859,8 +3913,12 @@ reload_module() {
             echo -e "${YELLOW}Warning: Superblock file not found: $superblock${NC}"
             echo -e "${YELLOW}This will create a new superblock when the array is started.${NC}"
 
-            # Ask for confirmation if creating a new superblock
-            read -r -p "Continue with a new superblock? (y/N): " confirm
+            if [[ "$AUTO_YES" -eq 1 ]]; then
+                confirm='y'
+            else
+                # Ask for confirmation if creating a new superblock
+                read -r -p "Continue with a new superblock? (y/N): " confirm
+            fi
             if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
                 echo "Operation cancelled."
                 return 1
@@ -3946,12 +4004,16 @@ mount_array_disks() {
 
     local mdstate="${NMDSTAT_VALUES[mdState]}"
     if [ "$mdstate" != "STARTED" ]; then
-        if [ "$UNATTENDED" -eq 1 ]; then
+        if [[ "$UNATTENDED" -eq 1 && "$AUTO_YES" -ne 1 ]]; then
             echo -e "${RED}Error: Array must be started before mounting disks (unattended mode)${NC}"
             return 1
         fi
         echo -e "${YELLOW}Array must be started before mounting disks${NC}"
-        read -r -p "Do you want to start the array now? (y/N): " start_now
+        if [[ $AUTO_YES -eq 1 ]]; then
+            start_now='y'
+        else
+            read -r -p "Do you want to start the array now? (y/N): " start_now
+        fi
         if [[ "$start_now" =~ ^[Yy]$ ]]; then
             start_array
         else
@@ -4478,6 +4540,10 @@ main() {
                 ;;
             "-u"|"--unattended")
                 UNATTENDED=1
+                shift
+                ;;
+            "-y"|"--yes")
+                AUTO_YES=1
                 shift
                 ;;
             "--no-color")

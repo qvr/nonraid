@@ -101,27 +101,32 @@ jobs:
           sudo dd if=/dev/zero of=d1 bs=1M count=1024 status=progress
           sudo dd if=/dev/zero of=d2 bs=1M count=1024 status=progress
           sudo dd if=/dev/zero of=d3 bs=1M count=1024 status=progress
+          sudo dd if=/dev/zero of=d4 bs=1M count=1024 status=progress
 
           # Set up loop devices
           disk1=$(sudo losetup -fP --show d1)
           disk2=$(sudo losetup -fP --show d2)
           disk3=$(sudo losetup -fP --show d3)
+          disk4=$(sudo losetup -fP --show d4)
 
           echo "DISK1=$disk1" >> $GITHUB_ENV
           echo "DISK2=$disk2" >> $GITHUB_ENV
           echo "DISK3=$disk3" >> $GITHUB_ENV
+          echo "DISK4=$disk4" >> $GITHUB_ENV
 
-          echo "Created loop devices: $disk1, $disk2, $disk3"
+          echo "Created loop devices: $disk1, $disk2, $disk3, $disk4"
 
           # Create partitions
           sudo sgdisk -o -a 8 -n 1:32K:0 $disk1
           sudo sgdisk -o -a 8 -n 1:32K:0 $disk2
           sudo sgdisk -o -a 8 -n 1:32K:0 $disk3
+          sudo sgdisk -o -a 8 -n 1:32K:0 $disk4
 
           # Create symlinks for device discovery
           sudo ln -s $disk1 -t /dev/disk/by-id/
           sudo ln -s $disk2 -t /dev/disk/by-id/
           sudo ln -s $disk3 -t /dev/disk/by-id/
+          sudo ln -s $disk4 -t /dev/disk/by-id/
 
           echo "Test environment ready"
 
@@ -145,8 +150,7 @@ jobs:
 
           # Start the array
           echo "Starting NonRAID array..."
-          echo "start NEW_ARRAY" | sudo tee /proc/nmdcmd
-          sleep 2 # Give array start time
+          sudo bash tools/nmdctl -u start new_array
 
           # Check status after start
           echo "Status After Start:"
@@ -154,8 +158,7 @@ jobs:
 
           # Start parity sync
           echo "Starting parity sync..."
-          echo "check CORRECT" | sudo tee /proc/nmdcmd
-          sleep 2
+          sudo bash tools/nmdctl -u check recon
 
           # Wait for parity sync with timeout
           start=$EPOCHSECONDS
@@ -199,14 +202,38 @@ jobs:
           sudo bash tools/nmdctl -u umount
           sudo bash tools/nmdctl -u stop
 
+          echo "Adding a new disk to the array..."
+          sudo bash tools/nmdctl add --force 3:${DISK4}p1:$(basename $DISK4)
+          sudo bash tools/nmdctl status || true
+          sudo bash tools/nmdctl -u start
+          sudo bash tools/nmdctl -u check clear
+          # Wait for disk clear with timeout
+          start=$EPOCHSECONDS
+          while ! grep -q "mdResync=0" /proc/nmdstat; do
+            echo "Waiting for Disk Clear to complete..."
+            sleep 2
+            if (( EPOCHSECONDS-start > 30 )); then
+              echo "Timeout waiting for Disk Clear"
+              grep -E 'mdState|mdResync' /proc/nmdstat
+              exit 1
+            fi
+          done
+
+          sudo bash tools/nmdctl status || true
+          sudo mkfs.xfs /dev/nmd3p1
+          sudo bash tools/nmdctl -u mount
+          sudo dd if=/dev/urandom of=/mnt/disk3/testfile2 bs=10M count=10 status=progress
+          sudo bash tools/nmdctl -u umount
+          sudo bash tools/nmdctl -u stop
+
+          echo "Unassign a disk from array..."
           sudo bash tools/nmdctl unassign 1 <<< "y" || true
           sudo bash tools/nmdctl status || true
 
           echo "Wiping disk 2..."
           sudo dd bs=1M if=/dev/zero of=${DISK2}p1 || true
 
-          echo "start DISABLE_DISK" | sudo tee /proc/nmdcmd
-          sleep 2
+          sudo bash tools/nmdctl -u start disable_disk
 
           sudo bash tools/nmdctl -u mount
           disabled_md5=$(md5sum /mnt/disk1/testfile)
@@ -224,18 +251,15 @@ jobs:
           sudo bash tools/nmdctl reload
           sudo bash tools/nmdctl import
 
-          echo "import 1 $(basename $DISK2)p1 0 $size 0 $(basename $DISK2)" | sudo tee /proc/nmdcmd
-          sleep 2
+          sudo bash tools/nmdctl -u replace -f 1:${DISK2}p1:$(basename $DISK2)
 
           sudo bash tools/nmdctl status || true
 
-          echo "start RECON_DISK" | sudo tee /proc/nmdcmd
-          sleep 2
+          sudo bash tools/nmdctl -u start recon_disk
 
           # Start disk reconstruction
           echo "Starting disk reconstruction..."
-          echo "check CORRECT" | sudo tee /proc/nmdcmd
-          sleep 2
+          sudo bash tools/nmdctl -u check recon
 
           # Wait for reconstruction with timeout
           start_recon=$EPOCHSECONDS

@@ -1,7 +1,5 @@
 [Unit]
 Description=Start/Stop NonRAID array and manage mounts
-Requires=local-fs.target
-After=local-fs.target
 
 [Service]
 Type=oneshot

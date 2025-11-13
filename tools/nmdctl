@@ -4074,8 +4074,15 @@ mount_array_disks() {
 
                 echo -n "Slot $slot (${diskname}): Mounting ${fs_type^^} to $mountpoint... "
 
+                # Check if device is defined in /etc/nonraid/fstab
+                local mount_opts=""
+                if [ -f "/etc/nonraid/fstab" ] && grep -q "^${device}[[:space:]]" "/etc/nonraid/fstab"; then
+                    mount_opts="--fstab /etc/nonraid/fstab --options-source-force"
+                fi
+
                 local mount_output
-                mount_output=$(mount "$device" "$mountpoint" 2>&1)
+                # shellcheck disable=SC2086 # We want word splitting for mount options
+                mount_output=$(mount $mount_opts "$device" "$mountpoint" 2>&1)
                 local mount_status=$?
 
                 if [ $mount_status -eq 0 ]; then

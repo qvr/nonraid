@@ -32,7 +32,8 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 - [Installation](#installation)
   - [Option 1: Install from PPA](#option-1-install-from-ppa)
   - [Option 2: Install from GitHub Releases](#option-2-install-from-github-releases)
-  - [Option 3: Fully manual installation from repository source](#option-3-fully-manual-installation-from-repository-source)
+  - [Option 3: Install from AUR (Archlinux)](#option-3-install-from-aur-archlinux)
+  - [Option 4: Fully manual installation from repository source](#option-4-fully-manual-installation-from-repository-source)
   - [Post-installation steps](#post-installation-steps)
 - [Quick Start](#quick-start)
 - [Array Management](#array-management)
@@ -116,7 +117,14 @@ sudo apt install dkms linux-headers-$(uname -r) build-essential
 sudo apt install ./nonraid-dkms_*.deb ./nonraid-tools_*.deb
 ```
 
-### Option 3: Fully manual installation from repository source
+### Option 3: Install from AUR (Archlinux)
+For Archlinux, you can use an [AUR](https://aur.archlinux.org/packages/nonraid-git) that you can install either manually (see [here](https://wiki.archlinux.org/title/Arch_User_Repository#Installing_and_upgrading_packages) for instructions), or via your favorite helper. For exemple with [yay](https://github.com/Jguer/yay) :
+```
+yay -Syu nonraid-git
+```
+The package will install the dkms kernel module, the systemd units, the default configuration, the nmdctl tool, and the udev rules.
+
+### Option 4: Fully manual installation from repository source
 For other distributions, or if you want to build the DKMS module manually, you can clone the repository and build the DKMS module from source, and copy the management tool from [tools/nmdctl](tools/nmdctl).
 
 <details>

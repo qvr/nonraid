@@ -32,7 +32,7 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 - [Installation](#installation)
   - [Option 1: Install from PPA](#option-1-install-from-ppa)
   - [Option 2: Install from GitHub Releases](#option-2-install-from-github-releases)
-  - [Option 3: Fully manual installation from repository source](#option-3-fully-manual-installation-from-repository-source)
+  - [Option 3: Fully manual installation from repository source and 3rd party packages](#option-3-fully-manual-installation-from-repository-source-and-3rd-party-packages)
   - [Post-installation steps](#post-installation-steps)
 - [Quick Start](#quick-start)
 - [Array Management](#array-management)
@@ -61,9 +61,9 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 | ------------- | --------------------- | ------------- | -------------- | ------ |
 | 6.1 - 6.4 | [nonraid-6.1](https://github.com/qvr/nonraid/tree/nonraid-6.1) | unRAID 6.12.15 (6.1.126-Unraid) | Debian 12 | Contains fixes backported from 6.6 branch |
 | 6.5 - 6.8 | [nonraid-6.6](https://github.com/qvr/nonraid/tree/nonraid-6.6) | unRAID 7.0.1 (6.6.78-Unraid) | Ubuntu 24.04 LTS GA kernel | No functional difference to 6.12 branch |
-| 6.11 - 6.16 | [nonraid-6.12](https://github.com/qvr/nonraid/tree/nonraid-6.12) | unRAID 7.1.2 (6.12.24-Unraid) | Ubuntu 24.04 LTS HWE kernel, Debian 13 | |
+| 6.11 - 6.17 | [nonraid-6.12](https://github.com/qvr/nonraid/tree/nonraid-6.12) | unRAID 7.1.2 (6.12.24-Unraid) | Ubuntu 24.04 LTS HWE kernel, Debian 13, Arch, Proxmox VE 9 | unRAID 7.2.0 has no changes to the kernel driver |
 
-The supported kernel version ranges might be inaccurate, the driver has been tested to work on **Ubuntu 24.04 LTS** GA kernel (6.8.0) and HWE kernels (6.11 and 6.14), on **Debian 12** (6.1) and on **Debian 13** (6.12). Note that kernel versions 6.9 and 6.10 are not supported. You can report other distributions and kernel versions that work in the [discussions](https://github.com/qvr/nonraid/discussions).
+The supported kernel version ranges might be inaccurate, the driver has been tested to work on **Ubuntu 24.04 LTS** GA kernel (6.8.0) and HWE kernels (6.11 and 6.14), on **Debian 12** (6.1), on **Debian 13** (6.12), on **Arch Linux** lts kernel (6.12) and stable kernels (6.16, 6.17) and on **Proxmox VE 9** (6.14). Note that kernel versions 6.9 and 6.10 are not supported. You can report other distributions and kernel versions that work in the [discussions](https://github.com/qvr/nonraid/discussions).
 
 ## Installation
 
@@ -116,8 +116,10 @@ sudo apt install dkms linux-headers-$(uname -r) build-essential
 sudo apt install ./nonraid-dkms_*.deb ./nonraid-tools_*.deb
 ```
 
-### Option 3: Fully manual installation from repository source
-For other distributions, or if you want to build the DKMS module manually, you can clone the repository and build the DKMS module from source, and copy the management tool from [tools/nmdctl](tools/nmdctl).
+### Option 3: Fully manual installation from repository source and 3rd party packages
+For **Arch Linux**, you can find NonRAID in an 3rd party maintained [AUR](https://aur.archlinux.org/packages/nonraid-git). Install the `nonraid-git` package from AUR using your preferred AUR helper (e.g. `yay -Syu nonraid-git`).
+
+For other distributions, or if you want to build the DKMS module manually, you can also clone the repository and build the DKMS module from source, and copy the management tool from [tools/nmdctl](tools/nmdctl).
 
 <details>
 <summary>Manual DKMS installation steps</summary>

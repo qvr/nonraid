@@ -2705,7 +2705,7 @@ list_available_devices() {
     virtio_majors=$(grep virtblk /proc/devices | awk '{print $1}')
 
     # Include SCSI/SATA in disk devices
-    include_majors="8"
+    include_majors="8,65,66,67,68,69,70,71"
     for major in $virtio_majors; do
         include_majors+=",$major"
     done

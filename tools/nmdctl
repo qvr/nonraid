@@ -76,8 +76,8 @@ Array Management Commands:
     import                          Import all disks to the array without starting it
 
 Disk Management Commands:
-    add                             Add a new disk to the array
-    replace SLOT                    Replace a disk in the specified slot
+    add [SLOT:DEV[:ID]]             Add a new disk to the array
+    replace SLOT[:DEV[:ID]]         Replace a disk in the specified slot
     unassign SLOT                   Unassign a disk from the specified slot
 
 Maintenance Commands:
@@ -3308,9 +3308,87 @@ create_array_interactive() {
 
 # Add a new disk to the array
 add_disk() {
-    local replace_slot="${1}"
+    local force=0
+    local disk_param=""
+    local replace_slot=""
     local parity_swap=0
     local preclear_done=0
+
+    # Parse force flag if present
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -f|--force)
+                force=1
+                shift
+                ;;
+            *)
+                # First non-flag argument is the disk parameter
+                if [ -z "$disk_param" ]; then
+                    disk_param="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    # Parse parameter if provided in SLOT:DEVICE[:ID] format
+    local param_slot=""
+    local param_device=""
+    local param_disk_id=""
+    local use_param_mode=0
+
+    if [ -n "$disk_param" ] && [[ "$disk_param" =~ : ]]; then
+        # Check if it matches SLOT:DEVICE[:ID] format
+        if [[ "$disk_param" =~ ^([0-9P-Q]|[12][0-9]|29):(.+)$ ]]; then
+            use_param_mode=1
+
+            # Parse the slot (first part before first colon)
+            param_slot="${disk_param%%:*}"
+            local rest="${disk_param#*:}"
+
+            # Parse device path and optional ID from rest
+            if [[ "$rest" =~ ^([^:]+):(.+)$ ]]; then
+                # device:ID format
+                param_device="${BASH_REMATCH[1]}"
+                param_disk_id="${BASH_REMATCH[2]}"
+            else
+                # just device
+                param_device="$rest"
+            fi
+
+            # Convert P/Q notation to slot numbers
+            case "$param_slot" in
+                [Pp])
+                    param_slot="0"
+                    ;;
+                [Qq])
+                    param_slot="29"
+                    ;;
+            esac
+
+            # Validate slot number
+            if ! [[ "$param_slot" =~ ^[0-9]+$ ]] || [ "$param_slot" -lt 0 ] || [ "$param_slot" -gt 29 ]; then
+                echo -e "${RED}Error: Invalid slot number: $param_slot (must be 0-29, P, or Q)${NC}"
+                return 1
+            fi
+
+            # Validate device path is not empty
+            if [ -z "$param_device" ]; then
+                echo -e "${RED}Error: Empty device path in parameter: $disk_param${NC}"
+                return 1
+            fi
+        else
+            # If it has a colon but doesn't match the format, it's an error
+            echo -e "${RED}Error: Invalid format for parameter: $disk_param${NC}"
+            echo -e "${YELLOW}Expected format: SLOT:DEVICE or SLOT:DEVICE:ID-STRING${NC}"
+            echo -e "${YELLOW}Example: nmdctl add 1:/dev/sdb1 or nmdctl add P:/dev/sda1:WD-12345${NC}"
+            return 1
+        fi
+    elif [ -n "$disk_param" ]; then
+        # Single parameter without colon is treated as replace_slot
+        replace_slot="$disk_param"
+    fi
+
     check_root
 
     # Check if module is loaded, will attempt to load if superblock provided
@@ -3341,6 +3419,44 @@ add_disk() {
         echo -e "${RED}Error: Array is currently not in stopped state (${mdstate})${NC}"
         echo -e "${YELLOW}Stop the array first with: ${GREEN}nmdctl stop${NC}"
         return 1
+    fi
+
+    # In parameter mode, determine if we're replacing or adding based on slot state
+    if [ "$use_param_mode" -eq 1 ]; then
+        if [ "${NMDSTAT_VALUES[diskSize.$param_slot]}" -gt 0 ]; then
+            if [ -z "${NMDSTAT_VALUES[diskId.$param_slot]}" ]; then
+                # Slot has size but no disk ID - this is a replace operation
+                replace_slot="$param_slot"
+            else
+                # Slot has a disk ID - check if it's a parity swap case
+                if [ "$param_slot" -eq 0 ] || [ "$param_slot" -eq 29 ]; then
+                    # Check that array already has an unassigned data slot for parity swap
+                    local has_empty_slot=0
+                    for slot in $(seq 1 28); do
+                        if [ "${NMDSTAT_VALUES[diskSize.$slot]}" -gt 0 ] && [ -z "${NMDSTAT_VALUES[diskId.$slot]}" ]; then
+                            has_empty_slot=1
+                            break
+                        fi
+                    done
+                    if [ "$has_empty_slot" -eq 0 ]; then
+                        echo -e "${RED}Error: No unassigned data slot available for parity swap${NC}"
+                        echo -e "${YELLOW}You must first unassign a data disk slot with ${GREEN}nmdctl unassign SLOT${NC}"
+                        return 1
+                    fi
+                    replace_slot="$param_slot"
+                else
+                    echo -e "${RED}Error: Slot $param_slot already has a disk assigned${NC}"
+                    echo -e "${YELLOW}Unassign slot first with ${GREEN}nmdctl unassign $param_slot${NC}"
+                    return 1
+                fi
+            fi
+        else
+            # Empty slot - this is an add operation
+            if [ -n "${NMDSTAT_VALUES[rdevId.$param_slot]}" ] || [ -n "${NMDSTAT_VALUES[diskId.$param_slot]}" ]; then
+                echo -e "${RED}Error: Slot $param_slot is already assigned${NC}"
+                return 1
+            fi
+        fi
     fi
 
     if [ -n "$replace_slot" ]; then
@@ -3395,17 +3511,22 @@ add_disk() {
         echo -e "${YELLOW}This will add a new disk to the array.${NC}"
     fi
     echo -e "${YELLOW}After adding the disk(s), the changes will be committed and new disks processed when the array is started.${NC}"
-    echo -e "${YELLOW}Only devices with an unused largest partition will be shown.${NC}"
+    if [ "$use_param_mode" -eq 0 ] || [ "$force" -eq 0 ]; then
+        echo -e "${YELLOW}Only devices with an unused largest partition will be shown.${NC}"
+    fi
     echo ""
 
-    # Get available devices
-    echo "Scanning for available disks..."
-    local all_available_devices=($(list_available_devices))
+    # Get available devices (skip if in parameter mode with force)
+    local all_available_devices=()
+    if [ "$use_param_mode" -eq 0 ] || [ "$force" -eq 0 ]; then
+        echo "Scanning for available disks..."
+        all_available_devices=($(list_available_devices))
 
-    if [ ${#all_available_devices[@]} -eq 0 ]; then
-        echo -e "${RED}Error: No suitable disk devices found${NC}"
-        echo -e "${YELLOW}Make sure disks are connected and are partitioned correctly${NC}"
-        return 1
+        if [ ${#all_available_devices[@]} -eq 0 ]; then
+            echo -e "${RED}Error: No suitable disk devices found${NC}"
+            echo -e "${YELLOW}Make sure disks are connected and are partitioned correctly${NC}"
+            return 1
+        fi
     fi
 
     # Get list of all disk IDs already in the array
@@ -3456,23 +3577,27 @@ add_disk() {
         fi
     done
 
-    if [ ${#available_devices[@]} -eq 0 ]; then
-        echo -e "${RED}Error: No suitable disk devices found${NC}"
-        if [ $filtered_count -gt 0 ]; then
-            echo -e "${YELLOW}Found $filtered_count disk(s), but all are already part of the array${NC}"
-        else
-            echo -e "${YELLOW}Make sure disks are connected and are partitioned correctly${NC}"
+    # Only check for available devices if not in parameter mode with force
+    if [ "$use_param_mode" -eq 0 ] || [ "$force" -eq 0 ]; then
+        if [ ${#available_devices[@]} -eq 0 ]; then
+            echo -e "${RED}Error: No suitable disk devices found${NC}"
+            if [ $filtered_count -gt 0 ]; then
+                echo -e "${YELLOW}Found $filtered_count disk(s), but all are already part of the array${NC}"
+            else
+                echo -e "${YELLOW}Make sure disks are connected and are partitioned correctly${NC}"
+            fi
+            return 1
         fi
-        return 1
+
+        echo -e "Found ${GREEN}${#available_devices[@]}${NC} suitable devices with partitions"
+        if [ $filtered_count -gt 0 ]; then
+            echo -e "(Filtered out $filtered_count disk(s) that are already part of the array)"
+        fi
+        echo ""
     fi
 
-    echo -e "Found ${GREEN}${#available_devices[@]}${NC} suitable devices with partitions"
-    if [ $filtered_count -gt 0 ]; then
-        echo -e "(Filtered out $filtered_count disk(s) that are already part of the array)"
-    fi
-    echo ""
-
-    if [ -z "$replace_slot" ]; then
+    # Only display available slots info in interactive mode (not needed in parameter mode)
+    if [ -z "$replace_slot" ] && [ "$use_param_mode" -eq 0 ]; then
         # Find available slots
         local available_slots=()
         local replaceable_slots=()
@@ -3521,47 +3646,123 @@ add_disk() {
     local selected_size_gb=0
     local selected_disk_id=""
 
-    format_available_devices "${available_devices[@]}"
-
-    # Select device
-    while true; do
-        read -r -p "Enter device number to add (1-${#available_devices[@]}) or 'q' to quit: " choice
-
-        if [ "$choice" = "q" ] || [ "$choice" = "Q" ]; then
-            echo "Operation cancelled."
-            return 0
-        fi
-
-        if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#available_devices[@]} ]; then
-            echo -e "${RED}Invalid choice. Please enter a number between 1 and ${#available_devices[@]}.${NC}"
-            continue
-        fi
-
-        selected_device="${available_devices[$((choice-1))]}"
-        IFS='|' read -r selected_dev selected_partition selected_size_kb selected_size_gb selected_disk_id <<< "$selected_device"
-
-        # Display selected disk details in the same format as create_array
+    if [ "$use_param_mode" -eq 1 ]; then
+        # Parameter mode: validate and use the provided device
+        echo -e "=== ${BLUE}Add Disk (Non-interactive Mode)${NC} ==="
         echo ""
-        echo -e "=== Selected disk: ${BLUE}$(basename "$selected_dev")${NC} ==="
+
+        # Build available devices string for validation (if we have scanned devices)
+        local cached_available_devices=""
+        if [ "$force" -eq 0 ]; then
+            # Join available_devices array into a space-separated string
+            cached_available_devices="${all_available_devices[*]}"
+        fi
+
+        # Validate device path using the shared validation function
+        if ! validate_device_path "$param_device" "$force" "$cached_available_devices"; then
+            return 1
+        fi
+
+        # Get device info
+        local parent_dev=$(lsblk -n -p "$param_device" -o PKNAME 2>/dev/null | head -1)
+        if [ -z "$parent_dev" ]; then
+            parent_dev="$param_device"
+        fi
+
+        # Set selected device info
+        selected_partition="$param_device"
+        selected_dev="$parent_dev"
+        selected_size_kb=$(get_disk_size_kb "$param_device")
+
+        if [ -z "$selected_size_kb" ] || [ "$selected_size_kb" -le 0 ]; then
+            echo -e "${RED}Error: Could not determine size for $param_device${NC}"
+            return 1
+        fi
+
+        selected_size_gb=$(format_kbytes "$selected_size_kb" 0 0 "gb")
+
+        # Get or use provided disk ID
+        if [ -n "$param_disk_id" ]; then
+            selected_disk_id="$param_disk_id"
+        else
+            selected_disk_id=$(udevadm info --query=property --property=ID_SERIAL --value --name="$parent_dev" 2>/dev/null)
+        fi
+
+        if [ -z "$selected_disk_id" ]; then
+            echo -e "${RED}Error: Could not determine disk ID for $param_device${NC}"
+            echo -e "${YELLOW}You may provide disk ID manually using format: $param_slot:$param_device:DISK-ID${NC}"
+            return 1
+        fi
+
+        # Check if disk is already in array (skip with --force)
+        if [ "$force" -eq 0 ]; then
+            local already_in_array=false
+            for array_id in "${array_disk_ids[@]}"; do
+                if [[ "$selected_disk_id" == *"$array_id"* ]] || [[ "$array_id" == *"$selected_disk_id"* ]]; then
+                    already_in_array=true
+                    break
+                fi
+            done
+
+            if $already_in_array; then
+                echo -e "${RED}Error: Disk $param_device is already part of the array${NC}"
+                return 1
+            fi
+        fi
+
+        # Display selected disk details
+        echo -e "Device: ${BLUE}$(basename "$selected_dev")${NC}"
         echo -e "Partition: $(basename "$selected_partition")"
         echo -e "Size: $selected_size_gb GB"
-        if [ -n "$selected_disk_id" ]; then
-            echo -e "ID: $selected_disk_id"
-        else
-            echo -e "ID: Unknown"
-            echo -e "${RED}No disk ID found for this device - unable to use it in the array${NC}"
-            continue
-        fi
+        echo -e "ID: $selected_disk_id"
         echo ""
+    else
+        # Interactive mode: display menu and let user select
+        format_available_devices "${available_devices[@]}"
 
-        break
-    done
+        # Select device
+        while true; do
+            read -r -p "Enter device number to add (1-${#available_devices[@]}) or 'q' to quit: " choice
+
+            if [ "$choice" = "q" ] || [ "$choice" = "Q" ]; then
+                echo "Operation cancelled."
+                return 0
+            fi
+
+            if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#available_devices[@]} ]; then
+                echo -e "${RED}Invalid choice. Please enter a number between 1 and ${#available_devices[@]}.${NC}"
+                continue
+            fi
+
+            selected_device="${available_devices[$((choice-1))]}"
+            IFS='|' read -r selected_dev selected_partition selected_size_kb selected_size_gb selected_disk_id <<< "$selected_device"
+
+            # Display selected disk details in the same format as create_array
+            echo ""
+            echo -e "=== Selected disk: ${BLUE}$(basename "$selected_dev")${NC} ==="
+            echo -e "Partition: $(basename "$selected_partition")"
+            echo -e "Size: $selected_size_gb GB"
+            if [ -n "$selected_disk_id" ]; then
+                echo -e "ID: $selected_disk_id"
+            else
+                echo -e "ID: Unknown"
+                echo -e "${RED}No disk ID found for this device - unable to use it in the array${NC}"
+                continue
+            fi
+            echo ""
+
+            break
+        done
+    fi
 
     # Select slot
     local selected_slot=""
     if [ -n "$replace_slot" ]; then
         selected_slot="$replace_slot"
         echo -e "Replacing disk in slot ${BLUE}$selected_slot${NC}"
+    elif [ "$use_param_mode" -eq 1 ]; then
+        # In parameter mode, use the provided slot
+        selected_slot="$param_slot"
     else
         while true; do
             echo -e "Enter slot assignment for this disk:"
@@ -3618,28 +3819,40 @@ add_disk() {
     if [ -n "$replace_slot" ]; then
         verb="replace"
     elif [ "$selected_slot" -ne 0 ] && [ "$selected_slot" -ne 29 ]; then
-        echo -e "${YELLOW}Note: If you have precleared the disk, you can optionally skip the clearing process done by the NonRAID driver${NC}"
-        echo -e "${RED}Warning:${YELLOW} If the disk has not been pre-cleared, skipping the clearing will lead to ${RED}array parity becoming invalid.${NC}"
-        echo ""
-        echo -e "${YELLOW}You can pre-clear the disk with: ${GREEN}dd if=/dev/zero of=$selected_partition bs=1M status=progress${NC}"
-        echo ""
-        read -r -p "Has the disk been pre-cleared? (y/N): " preclear
-        if [[ "$preclear" =~ ^[Yy]$ ]]; then
-            preclear_done=1
-            echo -e "${YELLOW}The disk will be marked as ${RED}pre-cleared.${NC}"
+        if [ "$use_param_mode" -eq 0 ]; then
+            # Interactive mode: ask user about preclear
+            echo -e "${YELLOW}Note: If you have precleared the disk, you can optionally skip the clearing process done by the NonRAID driver${NC}"
+            echo -e "${RED}Warning:${YELLOW} If the disk has not been pre-cleared, skipping the clearing will lead to ${RED}array parity becoming invalid.${NC}"
+            echo ""
+            echo -e "${YELLOW}You can pre-clear the disk with: ${GREEN}dd if=/dev/zero of=$selected_partition bs=1M status=progress${NC}"
+            echo ""
+            read -r -p "Has the disk been pre-cleared? (y/N): " preclear
+            if [[ "$preclear" =~ ^[Yy]$ ]]; then
+                preclear_done=1
+                echo -e "${YELLOW}The disk will be marked as ${RED}pre-cleared.${NC}"
+            else
+                echo -e "${YELLOW}The disk will be cleared when the array is started.${NC}"
+            fi
+            echo ""
         else
+            # Parameter mode: assume disk is NOT pre-cleared by default
             echo -e "${YELLOW}The disk will be cleared when the array is started.${NC}"
+            echo ""
         fi
-        echo ""
     fi
 
-    # Confirm selection
-    echo -e "You are about to ${YELLOW}$verb${NC}: ${YELLOW}$(basename "$selected_dev")${NC} to slot ${YELLOW}$slot_display${NC}"
-    read -r -p "Proceed with the operation? (y/N): " confirm
+    if [ "$use_param_mode" -eq 0 ]; then
+        # Confirm selection in interactive mode
+        echo -e "You are about to ${YELLOW}$verb${NC}: ${YELLOW}$(basename "$selected_dev")${NC} to slot ${YELLOW}$slot_display${NC}"
+        read -r -p "Proceed with the operation? (y/N): " confirm
 
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        echo "Operation cancelled."
-        return 0
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Operation cancelled."
+            return 0
+        fi
+    else
+        # In parameter mode, show what we're doing
+        echo -e "${YELLOW}Adding${NC}: ${YELLOW}$(basename "$selected_dev")${NC} ($(basename "$selected_partition")) to slot ${YELLOW}$slot_display${NC}"
     fi
 
     echo ""
@@ -4557,14 +4770,23 @@ main() {
             import_disks
             ;;
         "add")
-            add_disk
+            add_disk "$@"
             ;;
         "replace")
-            if [ -z "$1" ] || [[ "$1" == -* ]]; then
+            # Check if we have at least one non-flag argument
+            local has_slot=0
+            for arg in "$@"; do
+                if [[ ! "$arg" =~ ^- ]]; then
+                    has_slot=1
+                    break
+                fi
+            done
+
+            if [ "$has_slot" -eq 0 ]; then
                 echo -e "${RED}Error: Missing slot parameter for replace command${NC}"
                 return 1
             fi
-            add_disk "$1"
+            add_disk "$@"
             ;;
         "unassign")
             unassign_disk "$1"

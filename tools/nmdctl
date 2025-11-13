@@ -2357,6 +2357,7 @@ import_disks() {
 
 # Start the array by importing disks and starting the array
 start_array() {
+    local explicit_state="$1"
     check_root
 
     # Check if module is loaded, will attempt to load if superblock provided
@@ -2430,43 +2431,56 @@ start_array() {
             return 1
         fi
     else
-        # Abnormal state, require confirmation
-        echo -e "${YELLOW}Array is in abnormal state: $mdstate${NC}"
-
-        case "$mdstate" in
-            "NEW_ARRAY")
-                echo -e "${YELLOW}This is a new array being started for the first time.${NC}"
-                ;;
-            "RECON_DISK")
-                echo -e "${YELLOW}One or more disks need reconstruction.${NC}"
-                ;;
-            "DISABLE_DISK")
-                echo -e "${YELLOW}Array will run in degraded mode with missing disk(s).${NC}"
-                ;;
-            "SWAP_DSBL")
-                echo -e "${YELLOW}Array will do parity swap on start.${NC}"
-                echo -e "${RED}Existing parity disk contents needs to have been manually copied to new parity disk BEFORE starting array!${NC}"
-                ;;
-            "ERROR:"*)
-                echo -e "${RED}Array is in ERROR state. Starting may fail or cause data loss.${NC}"
-                ;;
-        esac
-
-        if [ "$UNATTENDED" -eq 1 ]; then
-            echo -e "${RED}Error: Cannot start array in abnormal state in unattended mode${NC}"
-            return 1
-        fi
-
-        # Ask for confirmation
-        read -r -p "Do you want to continue starting the array in this state? (y/N): " confirm
-        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-            echo "Proceeding with array start in $mdstate state"
-            if ! run_nmd_command "start $mdstate"; then
-                echo -e "${RED}Error: Failed to start array${NC}"
+        # Abnormal state, check if explicitly requested
+        if [ -n "$explicit_state" ]; then
+            # Explicit state was provided
+            if [[ "${mdstate,,}" == "${explicit_state,,}" ]]; then
+                # State matches, proceed without prompting
+                echo -e "${GREEN}Proceeding with explicitly requested state: $mdstate${NC}"
+            else
+                # State doesn't match, error out
+                echo -e "${RED}Error: Explicit state '$explicit_state' does not match current array state '$mdstate'${NC}"
                 return 1
             fi
         else
-            echo "Array start cancelled by user"
+            # No explicit state provided, require confirmation
+            echo -e "${YELLOW}Array is in abnormal state: $mdstate${NC}"
+
+            case "$mdstate" in
+                "NEW_ARRAY")
+                    echo -e "${YELLOW}This is a new array being started for the first time.${NC}"
+                    ;;
+                "RECON_DISK")
+                    echo -e "${YELLOW}One or more disks need reconstruction.${NC}"
+                    ;;
+                "DISABLE_DISK")
+                    echo -e "${YELLOW}Array will run in degraded mode with missing disk(s).${NC}"
+                    ;;
+                "SWAP_DSBL")
+                    echo -e "${YELLOW}Array will do parity swap on start.${NC}"
+                    echo -e "${RED}Existing parity disk contents needs to have been manually copied to new parity disk BEFORE starting array!${NC}"
+                    ;;
+                "ERROR:"*)
+                    echo -e "${RED}Array is in ERROR state. Starting may fail or cause data loss.${NC}"
+                    ;;
+            esac
+
+            if [ "$UNATTENDED" -eq 1 ]; then
+                echo -e "${RED}Error: Cannot start array in abnormal state in unattended mode${NC}"
+                return 1
+            fi
+
+            # Ask for confirmation
+            read -r -p "Do you want to continue starting the array in this state? (y/N): " confirm
+            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                echo "Array start cancelled by user"
+                return 1
+            fi
+        fi
+
+        echo "Proceeding with array start in $mdstate state"
+        if ! run_nmd_command "start $mdstate"; then
+            echo -e "${RED}Error: Failed to start array${NC}"
             return 1
         fi
     fi
@@ -4534,7 +4548,7 @@ main() {
             create_array "$@"
             ;;
         "start")
-            start_array
+            start_array "$1"
             ;;
         "stop")
             stop_array

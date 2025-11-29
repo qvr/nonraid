@@ -888,7 +888,7 @@ format_human_output() {
         echo -e "${YELLOW}WARNING: Driver internal state is inconsistent!${NC}"
         echo -e "${YELLOW}The array mdNum* counters show non-zero values, but all individual disks are DISK_OK status.${NC}"
         echo -e "${YELLOW}This can happen after initial array creation, but it may cause unexpected behavior.${NC}"
-        echo -e "${YELLOW}Recommend reloading the driver and starting the array again: ${GREEN}nmdctl reload && nmdctl start${NC}"
+        echo -e "${YELLOW}Recommend reloading the driver and starting the array again: ${GREEN}nmdctl unmount && nmdctl reload && nmdctl start${NC}"
         echo ""
     fi
 
@@ -1692,21 +1692,21 @@ format_kbytes() {
     elif [ "$force_unit" = "kb" ] || { [ -z "$force_unit" ] && [ "$kb" -lt 1024 ]; }; then
         [ "$add_unit" -eq 1 ] && unit=" kB"
         printf "%d%s" "$kb" "$unit"
-    elif [ "$force_unit" = "mb" ] || { [ -z "$force_unit" ] && [ "$kb" -lt 1048576 ]; }; then  # 1024^2
-        local mb=$((kb / 1024))
-        local remainder=$((kb % 1024))
+    elif [ "$force_unit" = "mb" ] || { [ -z "$force_unit" ] && [ "$bytes" -lt 1000000000 ]; }; then  # < 1 GB (decimal)
+        local mb=$((bytes / 1000000))
+        local remainder=$((bytes % 1000000))
         [ "$add_unit" -eq 1 ] && unit=" MB"
-        format_with_decimals "$mb" "$remainder" "1024" "$unit" "$decimal_places"
-    elif [ "$force_unit" = "gb" ] || { [ -z "$force_unit" ] && [ "$kb" -lt 1073741824 ]; }; then  # 1024^3
-        local gb=$((kb / 1048576))
-        local remainder=$((kb % 1048576))
+        format_with_decimals "$mb" "$remainder" "1000000" "$unit" "$decimal_places"
+    elif [ "$force_unit" = "gb" ] || { [ -z "$force_unit" ] && [ "$bytes" -lt 1000000000000 ]; }; then  # < 1 TB (decimal)
+        local gb=$((bytes / 1000000000))
+        local remainder=$((bytes % 1000000000))
         [ "$add_unit" -eq 1 ] && unit=" GB"
-        format_with_decimals "$gb" "$remainder" "1048576" "$unit" "$decimal_places"
+        format_with_decimals "$gb" "$remainder" "1000000000" "$unit" "$decimal_places"
     elif [ "$force_unit" = "tb" ] || [ -z "$force_unit" ]; then
-        local tb=$((kb / 1073741824))
-        local remainder=$((kb % 1073741824))
+        local tb=$((bytes / 1000000000000))
+        local remainder=$((bytes % 1000000000000))
         [ "$add_unit" -eq 1 ] && unit=" TB"
-        format_with_decimals "$tb" "$remainder" "1073741824" "$unit" "$decimal_places"
+        format_with_decimals "$tb" "$remainder" "1000000000000" "$unit" "$decimal_places"
     fi
 }
 

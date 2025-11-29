@@ -387,10 +387,38 @@ If the disk has been pre-cleared (partition zeroed with `dd if=/dev/zero of=/dev
 
 ### Replace a disk (interactive)
 
-Replaces a disk in the specified already unassigned slot with a new disk. The new disk must not already be assigned to the array, and it must be partitioned as described above.
+**Important: You must unassign the disk first.** The slot must be explicitly unassigned before replacement to clear the old disk ID from the superblock. This is an intentional safety feature to prevent accidentally replacing the wrong disk.
+
 ```bash
 sudo nmdctl replace SLOT
 ```
+
+**Full disk replacement workflow:**
+```bash
+# 1. Unmount filesystems (if mounted)
+sudo nmdctl unmount
+
+# 2. Stop array (if running)
+sudo nmdctl stop
+
+# 3. Unassign the failed disk (clears disk ID from superblock)
+sudo nmdctl unassign SLOT
+
+# 4. Replace with new disk
+sudo nmdctl replace SLOT
+
+# 5. Start array (will enter RECON_DISK state)
+sudo nmdctl start
+
+# 6. CRITICAL: Mount filesystems BEFORE starting rebuild
+sudo nmdctl mount
+
+# 7. Start rebuild
+sudo nmdctl check
+```
+
+> [!CAUTION]
+> **Mount filesystems BEFORE starting rebuild.** If you start the rebuild before mounting, writes that occur after mounting will update parity but not the already-rebuilt sectors, resulting in stale data on the rebuilt disk.
 
 > [!TIP]
 > A special "[Parity Swap](https://docs.unraid.net/legacy/FAQ/parity-swap-procedure/)" operation can be started by replacing an existing parity disk (slot 0 or 29) with a larger disk, and then using the existing parity disk as a replacement for an already unassigned data disk slot. The parity data will then need to be **manually copied** from the old parity disk to the new parity disk, and the rest of the new parity disk must be zeroed **before** starting the array.

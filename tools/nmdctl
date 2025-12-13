@@ -724,6 +724,27 @@ collect_resync_status() {
         RESYNC_STATUS_DATA["position_gb"]=$(format_kbytes "$mdresyncpos" 0 1 "gb")
         RESYNC_STATUS_DATA["size_kb"]="$mdresyncsize"
         RESYNC_STATUS_DATA["size_gb"]=$(format_kbytes "$mdresyncsize" 0 0 "gb")
+        # Attempt to restore elapsed time saved at pause time
+        local sbname_safe
+        sbname_safe=$(echo "${NMDSTAT_VALUES[sbName]}" | tr '/ ' '__')
+        local saved_file="/run/nonraid/nmdctl_resync_elapsed_${sbname_safe}"
+        local elapsed_seconds=0
+        if [ -f "$saved_file" ]; then
+            elapsed_seconds=$(cat "$saved_file" 2>/dev/null || echo 0)
+        else
+            # Fallback: estimate elapsed time from transferred data and rate
+            local rate_kb_s=0
+            if [ "$mdresyncdt" -gt 0 ]; then
+                rate_kb_s=$(( mdresyncdb / mdresyncdt ))
+            fi
+            if [ "$rate_kb_s" -gt 0 ]; then
+                elapsed_seconds=$(( mdresyncpos / rate_kb_s ))
+            else
+                elapsed_seconds=0
+            fi
+        fi
+        RESYNC_STATUS_DATA["rate_kb_s"]="${rate_kb_s:-0}"
+        RESYNC_STATUS_DATA["elapsed_seconds"]="$elapsed_seconds"
     # Check for pending operations
     elif [ "$mdresync" = "0" ] && { [ "$mdresyncaction" = "clear" ] || [[ "$mdresyncaction" == recon* ]]; }; then
         RESYNC_STATUS_DATA["pending"]="true"
@@ -755,6 +776,17 @@ collect_resync_status() {
         local sbsynced="${NMDSTAT_VALUES[sbSynced]}"
         if [ "$sbsynced" != "0" ] && [ -n "$sbsynced" ]; then
             elapsed_seconds=$(($(printf "%(%s)T")-sbsynced))
+        fi
+        # If there is a saved elapsed time from a previous paused operation, add it
+        local sbname_safe
+        sbname_safe=$(echo "${NMDSTAT_VALUES[sbName]}" | tr '/ ' '__')
+        local saved_file="/run/nonraid/nmdctl_resync_elapsed_${sbname_safe}"
+        if [ -f "$saved_file" ]; then
+            local saved_elapsed
+            saved_elapsed=$(cat "$saved_file" 2>/dev/null || echo 0)
+            if [ -n "$saved_elapsed" ] && [ "$saved_elapsed" -gt 0 ]; then
+                elapsed_seconds=$(( elapsed_seconds + saved_elapsed ))
+            fi
         fi
 
         RESYNC_STATUS_DATA["progress_percent"]="$progress"
@@ -2602,6 +2634,29 @@ handle_check() {
             return 0
         fi
         echo "$([[ "${option^^}" != "PAUSE" ]] && echo "Stopping" || echo "Pausing") $friendly_action..."
+        # If pausing, save current elapsed time so resume can add it back
+        if [[ "${option^^}" == "PAUSE" ]]; then
+            # compute elapsed using sbSynced if available, otherwise estimate from rate
+            local sbsynced_val="${NMDSTAT_VALUES[sbSynced]}"
+            local elapsed_to_save=0
+            if [ "$sbsynced_val" != "0" ] && [ -n "$sbsynced_val" ]; then
+                elapsed_to_save=$(($(printf "%(%s)T")-sbsynced_val))
+            else
+                local rate_kb_s=0
+                if [ "$mdresyncdt" -gt 0 ]; then
+                    rate_kb_s=$(( mdresyncdb / mdresyncdt ))
+                fi
+                if [ "$rate_kb_s" -gt 0 ]; then
+                    elapsed_to_save=$(( mdresyncpos / rate_kb_s ))
+                fi
+            fi
+            # store under /run/nonraid, namespaced by sbName
+            local sbname_safe
+            sbname_safe=$(echo "${NMDSTAT_VALUES[sbName]}" | tr '/ ' '__')
+            mkdir -p /run/nonraid 2>/dev/null || true
+            echo "$elapsed_to_save" > "/run/nonraid/nmdctl_resync_elapsed_${sbname_safe}"
+        fi
+
         if ! run_nmd_command "nocheck $option"; then
             echo -e "${RED}Error: Failed to $([[ "${option^^}" != "PAUSE" ]] && echo "stop" || echo "pause") $friendly_action${NC}"
             return 1
@@ -2672,6 +2727,15 @@ handle_check() {
     if ! run_nmd_command "check $option"; then
         echo -e "${RED}Error: Failed to start $friendly_action${NC}"
         return 1
+    fi
+    # If resuming, remove any saved elapsed snapshot (driver will handle new timing)
+    if [[ "${option^^}" == "RESUME" ]]; then
+        local sbname_safe
+        sbname_safe=$(echo "${NMDSTAT_VALUES[sbName]}" | tr '/ ' '__')
+        local saved_file="/run/nonraid/nmdctl_resync_elapsed_${sbname_safe}"
+        if [ -f "$saved_file" ]; then
+            rm -f "$saved_file" 2>/dev/null || true
+        fi
     fi
 
     echo -e "${GREEN}$friendly_action $([[ "${option^^}" != "RESUME" ]] && echo "started" || echo "resumed")${NC}"

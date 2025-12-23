@@ -426,7 +426,10 @@ sudo nmdctl unmount
 
 Starts or stops a parity check. This will also start reconstruction or clear operations depending on the array state, user confirmation is required if a normal parity check is not being started.
 
-The NonRAID [systemd service](tools/systemd/nonraid.service) will trigger a corrective parity check, if it detects an unclean shutdown has happened.
+The NonRAID [systemd service](tools/systemd/nonraid.service) will trigger a corrective parity check, if it detects an unclean shutdown has happened. Note that the parity check will run even if the array has no parity disks - this is normal behavior of the upstream driver.
+
+> [!TIP]
+> If the parity check is being triggered on every boot, you probably have some service that is not cleanly stopping before the array is stopped. Make sure that any services using the NonRAID disks (like mergerfs mounts, Docker/LXC containers etc) are properly stopped before the array is stopped. You can add [systemd overrides](https://github.com/qvr/nonraid/issues/97#issuecomment-3683099008) to ensure proper service stop order if needed.
 
 In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`), this is recommended for scheduled parity checks and used by the included [quarterly systemd timer](tools/systemd/nonraid-parity-check.timer).
 

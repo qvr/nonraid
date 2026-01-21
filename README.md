@@ -49,6 +49,7 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
   - [Set array settings](#set-array-settings)
   - [Reload the nonraid module](#reload-the-nonraid-module)
   - [Using a custom superblock file location](#using-a-custom-superblock-file-location)
+- [Migrating an existing UnRAID array](#migrating-an-existing-unraid-array)
 - [Manual Management (Using Driver Interface)](#manual-management-using-driver-interface)
 - [Caveats](#caveats)
 - [Plans](#plans)
@@ -467,6 +468,36 @@ sudo nmdctl -s /path/to/superblock.dat reload
 > [!TIP]
 > If you change the default superblock location, you should also change it in `/etc/default/nonraid`, as the systemd service will otherwise continue to use the default path when starting the array at boot.
 
+## Migrating an existing UnRAID array
+
+> [!WARNING]
+> Migrating an existing UnRAID array to NonRAID should be considered an experimental feature and needs to be done with caution.
+
+The NonRAID driver should be able to handle disks from an actual UnRAID system, but there are some caveats to be aware of:
+
+Differences in how UnRAID might have partitioned the disks and then chosen the "usable" size for UnRAID block devices can lead to size mismatches that prevent proper import of the array. The partitioning and sizing scheme supported by NonRAID's `nmdctl` is based on observations from latest UnRAID versions, but there have been differences in other versions and configurations.
+
+It is important that the original superblock file from UnRAID is copied to the NonRAID system, as it contains the array sizing and disk assignment information, which `nmdctl` uses to validate its own detected partition sizing against.
+
+Before moving the disks, to prevent NonRAID from trying to automatically start the array on boot before you have had a chance to verify the import, you should disable the included systemd service temporarily:
+```bash
+sudo systemctl disable nonraid.service
+```
+
+Then copy the original UnRAID superblock file (usually located at `/boot/config/super.dat`) to the NonRAID system, placing it at `/nonraid.dat` (or your chosen custom location).
+
+Once the superblock file is in place, you can attempt to import the array without starting it:
+```bash
+sudo nmdctl import
+```
+
+If you get a warning about size mismatch between detected and configured partition size, **do not continue the import**, but open an issue with details.
+
+> [!CAUTION]
+> Starting the array and mounting the disks with mismatched partition sizes will lead to filesystem corruption and possible data loss.
+
+If the import is successful, you can then start the array normally, and enable the systemd service again for automatic startup on boot. You should also run a parity check in check-only mode (`sudo nmdctl check nocorrect`) after the first start to ensure the array parity is still valid.
+
 ## Manual Management (Using Driver Interface)
 If you need to interact with the raw kernel driver (for troubleshooting, development, or to understand what `nmdctl` is doing under the hood), details on the driver interface can be found in: [docs/manual-management.md](docs/manual-management.md).
 
@@ -478,8 +509,6 @@ That document covers: superblock handling, procfs command/status interfaces (`/p
 - You'll still need to manually handle some aspects like creating filesystems on the nmd devices and setting up mergerfs if you want to combine multiple disks into a single mount point.
 - While the `nmdctl` tool handles many error conditions, the underlying driver can still be finicky. Custom patches are used to avoid most common crashes (like trying to start the array without importing all disks).
 - If you encounter issues, please use the [project discussions](https://github.com/qvr/nonraid/discussions) for support rather than UnRAID forums, as this is an independent project.
-- Driver should be able to handle disks from an actual UnRAID system, but I have never used or installed UnRAID so I don't actually know
-  - Other way around, moving array created on this to UnRAID _probably_ does not work, unless the disks have been partitioned exactly as UnRAID system expects them to be - if you can try it out, please report back!
 - This was done out of interest and for fun - no guarantees on how quickly upstream changes are synced, or if they are done at all
 - For a complete, polished storage solution with support, you might want to still consider getting UnRAID
 

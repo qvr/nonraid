@@ -2625,6 +2625,10 @@ handle_check() {
     if [[ "$mdresync" -eq 0 ]] && [[ "$mdresyncpos" -gt 0 ]] && [[ "${option^^}" != "RESUME" ]]; then
         echo -e "${YELLOW}Warning: Previous resync operation $friendly_action is currently paused at $(( mdresyncpos * 100 / mdresyncsize ))%${NC}"
         echo -e "${YELLOW}You can resume it with ${GREEN}nmdctl check RESUME${NC}"
+        if [ "$UNATTENDED" -eq 1 ]; then
+            echo -e "${RED}Error: Cannot start new operation with a paused operation pending (unattended mode)${NC}"
+            return 1
+        fi
         read -r -p "Are you sure you want to start a new operation without resuming? (y/N): " confirm
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             echo "Parity check cancelled by user"

@@ -8,14 +8,15 @@ Type=oneshot
 RemainAfterExit=yes
 StateDirectory=nonraid
 Environment="SUPER=/nonraid.dat"
+Environment="AUTOMOUNT=yes"
 Environment="MOUNT_PARAMS="
 Environment="STARTUP_SETTINGS="
 EnvironmentFile=-/etc/default/nonraid
 ExecStart=nmdctl -u -v -s $SUPER start
 ExecStart=bash -c 'if [[ -f "${STATE_DIRECTORY}/array.running" ]]; then echo "Unclean shutdown detected!"; nmdctl -u check correct; else touch "${STATE_DIRECTORY}/array.running"; fi'
 ExecStart=-bash -c 'echo -n "$STARTUP_SETTINGS"|while IFS= read -rd, set || [ -n "$set" ]; do nmdctl set $set; done'
-ExecStart=-nmdctl -u mount $MOUNT_PARAMS
-ExecStop=nmdctl -u unmount
+ExecStart=-bash -c '[ "$AUTOMOUNT" = "yes" ] && nmdctl -u mount $MOUNT_PARAMS || true'
+ExecStop=-bash -c '[ "$AUTOMOUNT" = "yes" ] && nmdctl -u unmount || true'
 ExecStop=nmdctl -u stop
 ExecStop=rm -f ${STATE_DIRECTORY}/array.running
 

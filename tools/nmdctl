@@ -11,7 +11,7 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 # Our version
-VERSION=1.21.0
+VERSION=1.22.0
 
 # Colors for pretty output
 RED='\033[0;31m'

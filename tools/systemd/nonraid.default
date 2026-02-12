@@ -5,6 +5,13 @@
 # Example: SUPER=/path/to/your/nonraid.dat
 #SUPER=/nonraid.dat
 
+# Automatically mount/unmount array disks with the service
+# Set to "no" to disable automatic mounting and unmounting of array disks.
+# Note that you will then have to make sure the disks are unmounted before the
+# NonRAID service stops, to avoid unclean shutdown of the array.
+# Default: yes
+#AUTOMOUNT="yes"
+
 # Additional parameters for mounting
 # These parameters are passed to nmdctl mount command
 # Default: empty (no additional parameters)

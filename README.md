@@ -416,6 +416,17 @@ Mounts all detected unmounted filesystems to `MOUNTPREFIX` (default `/mnt/diskN`
 sudo nmdctl mount [MOUNTPREFIX]
 ```
 
+Per-disk mount options can be set in `/etc/nonraid/fstab` using standard fstab format. When an entry exists for a disk, those options are used instead of the defaults.
+
+```bash
+# /etc/nonraid/fstab
+/dev/nmd1p1         /mnt/disk1         xfs   rw,noatime         0 2
+/dev/mapper/nmd2p1  /mnt/disk2         xfs   rw,noatime         0 2
+/dev/nmd3p1         /mnt/disk3         btrfs compress=zstd      0 2
+```
+
+For LUKS-encrypted disks, use the mapped device name (`/dev/mapper/nmdNp1`).
+
 ### Unmount all data disks
 
 Unmounts all detected mounted filesystems. LUKS devices are closed after filesystem unmount.

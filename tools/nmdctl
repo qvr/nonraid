@@ -31,9 +31,10 @@ SUPERBLOCK_PATH=""
 # LUKS keyfile path
 LUKS_KEYFILE="/etc/nonraid/luks-keyfile"
 
-# verbose, unattended
+# verbose, unattended, yes-to-all
 VERBOSE=0
 UNATTENDED=0
+YES_TO_ALL=0
 # status modes
 NO_FS=0
 MONITOR_MODE=0
@@ -96,6 +97,7 @@ Global Options:
     -s, --super PATH                Superblock file path (default: ${DEFAULT_SUPERBLOCK})
     -k, --keyfile PATH              LUKS keyfile path (default: ${LUKS_KEYFILE})
     -u, --unattended                Enable unattended mode
+    -y, --yes                       Auto-confirm all prompts (answer yes)
     --no-color                      Disable colored output
     -v, --verbose                   Enable verbose output
     -V, --version                   Display version information
@@ -2629,7 +2631,11 @@ handle_check() {
             echo -e "${RED}Error: Cannot start new operation with a paused operation pending (unattended mode)${NC}"
             return 1
         fi
-        read -r -p "Are you sure you want to start a new operation without resuming? (y/N): " confirm
+        if [ "$YES_TO_ALL" -eq 1 ]; then
+            confirm="y"
+        else
+            read -r -p "Are you sure you want to start a new operation without resuming? (y/N): " confirm
+        fi
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             echo "Parity check cancelled by user"
             return 1
@@ -2648,7 +2654,11 @@ handle_check() {
                 return 1
             fi
 
-            read -r -p "Do you want to proceed with $friendly_action? (y/N): " confirm
+            if [ "$YES_TO_ALL" -eq 1 ]; then
+                confirm="y"
+            else
+                read -r -p "Do you want to proceed with $friendly_action? (y/N): " confirm
+            fi
             if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
                 echo "Sync operation cancelled by user"
                 return 1
@@ -2660,7 +2670,11 @@ handle_check() {
             option="NOCORRECT"
         elif [ -z "$1" ]; then
             echo -e "${YELLOW}No option provided, defaulting to corrective parity check${NC}"
-            read -r -p "Do you want to continue? (y/N): " confirm
+            if [ "$YES_TO_ALL" -eq 1 ]; then
+                confirm="y"
+            else
+                read -r -p "Do you want to continue? (y/N): " confirm
+            fi
             if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
                 echo "Parity check cancelled by user"
                 return 1
@@ -4722,6 +4736,10 @@ main() {
                 ;;
             "-u"|"--unattended")
                 UNATTENDED=1
+                shift
+                ;;
+            "-y"|"--yes")
+                YES_TO_ALL=1
                 shift
                 ;;
             "--no-color")

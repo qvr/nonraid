@@ -2636,7 +2636,7 @@ handle_check() {
         fi
     fi
     # Check if some other sync operation is pending, and confirm with the user
-    if [[ "$mdresyncaction" != check* ]]; then
+    if [[ "${option^^}" != "RESUME" ]] && [[ "$mdresyncaction" != check* ]]; then
         # If we're explicitly given an option for the pending sync operation, allow that operation to proceed
         if [ -n "$1" ] && [[ "$mdresyncaction" == "${option,,}"* ]]; then
             echo -e "${GREEN}Proceeding with explicitly requested operation: $friendly_action${NC}"

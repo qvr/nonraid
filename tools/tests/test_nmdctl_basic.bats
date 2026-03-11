@@ -321,6 +321,73 @@ EOF
     [[ "$output" =~ WARNING:\ Driver\ internal\ state ]]
 }
 
+@test "handle_check - RESUME resumes paused parity check" {
+    create_mock_nmdstat "STARTED" 0 0 0 "check P" 500000 1000000 0 0 > "$BATS_TMPDIR/mock_nmdstat_paused_check"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_paused_check"
+    eval 'run_nmd_command() { echo "cmd: $*"; return 0; }'
+    run handle_check "RESUME"
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "cmd: check RESUME" ]]
+}
+
+@test "handle_check - RESUME in unattended mode resumes paused parity check" {
+    create_mock_nmdstat "STARTED" 0 0 0 "check P" 500000 1000000 0 0 > "$BATS_TMPDIR/mock_nmdstat_paused_check_unattended"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_paused_check_unattended"
+    export UNATTENDED=1
+    eval 'run_nmd_command() { echo "cmd: $*"; return 0; }'
+    run handle_check "RESUME"
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "cmd: check RESUME" ]]
+}
+
+@test "handle_check - new check blocked in unattended mode with paused operation" {
+    create_mock_nmdstat "STARTED" 0 0 0 "check P" 500000 1000000 0 0 > "$BATS_TMPDIR/mock_nmdstat_paused_check_block"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_paused_check_block"
+    export UNATTENDED=1
+    run handle_check
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Cannot start new operation with a paused operation pending" ]]
+}
+
+@test "handle_check - RESUME blocked when no paused operation" {
+    # mdResync=0, mdResyncPos=0 means nothing paused
+    create_mock_nmdstat "STARTED" 0 0 0 "check P" 0 0 0 0 > "$BATS_TMPDIR/mock_nmdstat_no_paused"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_no_paused"
+    run handle_check "RESUME"
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "No paused resync operation to resume" ]]
+}
+
+@test "handle_check - check blocked in unattended mode when recon is pending" {
+    # mdResync=0, mdResyncPos=0, mdResyncAction=recon means a recon is pending (not started)
+    create_mock_nmdstat "STARTED" 0 1 0 "recon P" 0 1000000 0 0 > "$BATS_TMPDIR/mock_nmdstat_recon_pending"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_recon_pending"
+    export UNATTENDED=1
+    run handle_check
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ "Cannot start parity check with another sync operation pending" ]]
+}
+
 @test "status parsing - Parity check with errors found" {
     # Create mock with parity check that found errors
     create_mock_nmdstat "STARTED" 0 0 0 "check P" 0 0 1 15 > "$BATS_TMPDIR/mock_nmdstat_parity_errors"

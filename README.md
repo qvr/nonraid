@@ -50,6 +50,7 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
   - [Reload the nonraid module](#reload-the-nonraid-module)
   - [Using a custom superblock file location](#using-a-custom-superblock-file-location)
 - [Migrating an existing UnRAID array](#migrating-an-existing-unraid-array)
+- [Performance expectations](#performance-expectations)
 - [Manual Management (Using Driver Interface)](#manual-management-using-driver-interface)
 - [Caveats](#caveats)
 - [Plans](#plans)
@@ -62,7 +63,7 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 | ------------- | --------------------- | ------------- | -------------- | ------ |
 | 6.1 - 6.4 | [nonraid-6.1](https://github.com/qvr/nonraid/tree/nonraid-6.1) | unRAID 6.12.15 (6.1.126-Unraid) | Debian 12 | Contains fixes backported from 6.6 branch |
 | 6.5 - 6.8 | [nonraid-6.6](https://github.com/qvr/nonraid/tree/nonraid-6.6) | unRAID 7.0.1 (6.6.78-Unraid) | Ubuntu 24.04 LTS GA kernel | No functional difference to 6.12 branch |
-| 6.11 - 6.17 | [nonraid-6.12](https://github.com/qvr/nonraid/tree/nonraid-6.12) | unRAID 7.1.2 (6.12.24-Unraid) | Ubuntu 24.04 LTS HWE kernel, Debian 13, Arch, Proxmox VE 9 | unRAID 7.2.0 has no changes to the kernel driver |
+| 6.11 - 6.18 | [nonraid-6.12](https://github.com/qvr/nonraid/tree/nonraid-6.12) | unRAID 7.1.2 (6.12.24-Unraid) | Ubuntu 24.04 LTS HWE kernel, Debian 13, Arch, Proxmox VE 9 | unRAID 7.2.0 has no changes to the kernel driver |
 
 The supported kernel version ranges might be inaccurate, the driver has been tested to work on **Ubuntu 24.04 LTS** GA kernel (6.8.0) and HWE kernels (6.11 and 6.14), on **Debian 12** (6.1), on **Debian 13** (6.12), on **Arch Linux** lts kernel (6.12) and stable kernels (6.16, 6.17) and on **Proxmox VE 9** (6.14). Note that kernel versions 6.9 and 6.10 are not supported. You can report other distributions and kernel versions that work in the [discussions](https://github.com/qvr/nonraid/discussions).
 
@@ -508,6 +509,41 @@ If you get a warning about size mismatch between detected and configured partiti
 > Starting the array and mounting the disks with mismatched partition sizes will lead to filesystem corruption and possible data loss.
 
 If the import is successful, you can then start the array normally, and enable the systemd service again for automatic startup on boot. You should also run a parity check in check-only mode (`sudo nmdctl check nocorrect`) after the first start to ensure the array parity is still valid.
+
+## Performance expectations
+
+The unRAID/NonRAID driver architecture has some fundamental performance characteristics that differ from traditional RAID systems. Understanding these trade-offs helps set the right expectations.
+
+### Write performance
+
+Every write to a data disk requires a read-modify-write cycle, where the existing data and parity are read, the parity is calculated, and then the new data and parity are written back. Due to this cycle, write throughput is typically around 1/3 of single-disk speed - each write requires two reads and two writes across the data and parity disks. The parity disk is involved in every write operation, so multiple simultaneous writes to different data disks compete for parity disk access and cannot truly happen in parallel. This is a fundamental property of the upstream unRAID architecture.
+
+Turbo write mode or reconstruct write (`nmdctl set md_write_method 1`) bypasses the read-modify-write cycle by reading all disks simultaneously to recalculate parity from scratch on every write. This can significantly improve write throughput, at the cost of keeping all array disks active and spinning.
+
+Copying files from one array disk to another incurs an even heavier performance hit, as it involves both a read path and a write path, with the write path going through the full parity update cycle. Expect noticeably lower throughput for intra-array copies compared to writing new data.
+
+### Read performance
+
+Reads are not limited by parity overhead - data is read directly from whichever disk holds the file. However, since files are stored whole on a single disk (no striping), read throughput for a single file is limited to the speed of that one disk. You cannot achieve aggregated throughput across multiple disks for a single sequential read, unlike striped RAID arrays.
+
+Multiple simultaneous reads from different disks (e.g. different users or services accessing different files) can proceed independently and in parallel, as each read only involves its own data disk.
+
+### Improving write performance with a cache disk
+
+A common way to work around write performance limitations is to use a separate SSD or NVMe drive as a write cache. New files are written directly to the fast cache disk at full SSD speed, bypassing the parity overhead entirely. A background mover process then periodically migrates files from the cache disk to the parity-protected array disks.
+
+This setup pairs well with [mergerfs](https://github.com/trapexit/mergerfs), which can present the cache disk and array disks as a single unified mount point while transparently directing new writes to the cache. Projects like [mergerfs-cache-mover](https://github.com/monstermuffin/mergerfs-cache-mover) provide ready-made scripts for the periodic cache-to-array migration.
+
+### Practical implications
+
+- **Sequential write throughput** to the array is typically around 1/3 of single-disk HDD speed due to the read-modify-write cycle
+- **Sequential read throughput** for a single file is single-disk speed
+- **Concurrent reads** from different disks can proceed in parallel without degrading each other
+- **Concurrent reads and writes** will compete for the parity disk during writes, which can noticeably impact read performance during heavy write activity
+- **Intra-array file copies** (from one array disk to another) are particularly slow due to simultaneous read and write parity overhead
+- A **cache disk** (SSD or NVMe) paired with a mover script and mergerfs is a popular way to improve write performance
+
+For workloads that primarily read large media files sequentially and write infrequently (e.g. a home media server), these trade-offs are generally acceptable. For workloads requiring high sustained write throughput or low write latency, a different storage architecture may be more appropriate.
 
 ## Manual Management (Using Driver Interface)
 If you need to interact with the raw kernel driver (for troubleshooting, development, or to understand what `nmdctl` is doing under the hood), details on the driver interface can be found in: [docs/manual-management.md](docs/manual-management.md).

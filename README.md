@@ -63,7 +63,7 @@ While this is a fork, we try to keep the changes to driver minimal to make syncs
 | ------------- | --------------------- | ------------- | -------------- | ------ |
 | 6.1 - 6.4 | [nonraid-6.1](https://github.com/qvr/nonraid/tree/nonraid-6.1) | unRAID 6.12.15 (6.1.126-Unraid) | Debian 12 | Contains fixes backported from 6.6 branch |
 | 6.5 - 6.8 | [nonraid-6.6](https://github.com/qvr/nonraid/tree/nonraid-6.6) | unRAID 7.0.1 (6.6.78-Unraid) | Ubuntu 24.04 LTS GA kernel | No functional difference to 6.12 branch |
-| 6.11 - 6.17 | [nonraid-6.12](https://github.com/qvr/nonraid/tree/nonraid-6.12) | unRAID 7.1.2 (6.12.24-Unraid) | Ubuntu 24.04 LTS HWE kernel, Debian 13, Arch, Proxmox VE 9 | unRAID 7.2.0 has no changes to the kernel driver |
+| 6.11 - 6.18 | [nonraid-6.12](https://github.com/qvr/nonraid/tree/nonraid-6.12) | unRAID 7.1.2 (6.12.24-Unraid) | Ubuntu 24.04 LTS HWE kernel, Debian 13, Arch, Proxmox VE 9 | unRAID 7.2.0 has no changes to the kernel driver |
 
 The supported kernel version ranges might be inaccurate, the driver has been tested to work on **Ubuntu 24.04 LTS** GA kernel (6.8.0) and HWE kernels (6.11 and 6.14), on **Debian 12** (6.1), on **Debian 13** (6.12), on **Arch Linux** lts kernel (6.12) and stable kernels (6.16, 6.17) and on **Proxmox VE 9** (6.14). Note that kernel versions 6.9 and 6.10 are not supported. You can report other distributions and kernel versions that work in the [discussions](https://github.com/qvr/nonraid/discussions).
 

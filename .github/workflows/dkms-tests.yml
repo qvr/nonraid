@@ -31,6 +31,7 @@ jobs:
           - { name: "Debian 13", image: "debian:13", headers: "linux-headers-amd64", pkg_mgr: "apt", experimental: false }
           - { name: "Ubuntu 24.04", image: "ubuntu:24.04", headers: "linux-headers-generic", pkg_mgr: "apt", experimental: false }
           - { name: "Ubuntu 24.04 HWE", image: "ubuntu:24.04", headers: "linux-headers-generic-hwe-24.04", pkg_mgr: "apt", experimental: false }
+          - { name: "Ubuntu 26.04", image: "ubuntu:26.04", headers: "linux-headers-generic", pkg_mgr: "apt", experimental: false }
           - { name: "Arch Linux", image: "archlinux:latest", headers: "linux-headers", pkg_mgr: "pacman", experimental: true }
       fail-fast: false
 

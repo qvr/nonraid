@@ -25,11 +25,13 @@ errs=$(nmdstat sbSyncErrs)
 [ "$errs" -gt 0 ] || fail "NOCORRECT check found no sync errors in corrupted parity"
 info "ok: NOCORRECT check found $errs sync errors"
 summary_status "after NOCORRECT check of corrupted parity"
+assert_fails "status reports unhealthy array with uncorrected sync errors" quiet nmd status
 
 sync_run CORRECT
 errs=$(nmdstat sbSyncErrs)
 [ "$errs" -gt 0 ] || fail "CORRECT check reported no corrected sync errors"
 info "ok: CORRECT check corrected $errs sync errors"
+quiet nmd status || fail "status reports an unhealthy array after a CORRECT check fixed the sync errors"
 
 sync_run NOCORRECT
 assert_nmdstat sbSyncErrs 0

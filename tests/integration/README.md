@@ -38,9 +38,10 @@ Each test is a standalone script which, via [lib.sh](lib.sh):
 | `01-create-sync` | create, initial parity sync, mkfs/mount, status output formats, label, stop/start, parity check |
 | `02-add-disk` | add a new disk, driver clear, use the new disk |
 | `03-replace-disk` | unassign, degraded start with emulated disk, replace, rebuild |
-| `04-parity-check` | corrupted parity detected by `NOCORRECT` check, fixed by `CORRECT` check |
+| `04-parity-check` | corrupted parity detected by `NOCORRECT` check, fixed by `CORRECT` check, status health after each |
 | `05-dual-parity` | P+Q array, two disks emulated at once, replace and rebuild both |
 | `06-parity-swap` | parity swap: bigger disk replaces parity, old parity disk replaces a failed data disk |
+| `07-check-pause` | pause and resume a parity check (4GB disks), status of paused and pending operations and without an array |
 
 ## Kernel log check
 

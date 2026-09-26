@@ -729,6 +729,8 @@ collect_resync_status() {
     # Check for pending operations
     elif [ "$mdresync" = "0" ] && { [ "$mdresyncaction" = "clear" ] || [[ "$mdresyncaction" == recon* ]]; }; then
         RESYNC_STATUS_DATA["pending"]="true"
+        RESYNC_STATUS_DATA["size_kb"]="$mdresyncsize"
+        RESYNC_STATUS_DATA["size_gb"]=$(format_kbytes "$mdresyncsize" 0 0 "gb")
     # Check for active operation
     elif [ "$mdresync" != "0" ] && [ -n "$mdresync" ]; then
         RESYNC_STATUS_DATA["active"]="true"

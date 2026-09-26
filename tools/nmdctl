@@ -483,6 +483,13 @@ collect_array_health() {
     local sbsyncerrs="${NMDSTAT_VALUES[sbSyncErrs]}"
     local sbsyncexit="${NMDSTAT_VALUES[sbSyncExit]}"
 
+    # sbSyncErrs counts the errors the last check found, but a correcting check
+    # that finished cleanly has already fixed them
+    local unresolved_sync_errs="$sbsyncerrs"
+    if [ "${NMDSTAT_VALUES[mdResyncCorr]}" = "1" ] && [ "$sbsyncexit" = "0" ]; then
+        unresolved_sync_errs=0
+    fi
+
     # Count the total number of disk slots that are defined in the array
     local total_slots=$(get_defined_slots_count)
 
@@ -592,7 +599,7 @@ collect_array_health() {
         health_code=1
     elif [ "$mdnummissing" -gt 0 ] || [ "$mdnuminvalid" -gt 0 ] ||
          [ "$mdnumwrong" -gt 0 ] || [ "$mdnumdisabled" -gt 0 ] ||
-         [ "$mdnumreplaced" -gt 0 ] || [ "$sbsyncerrs" -gt 0 ] ||
+         [ "$mdnumreplaced" -gt 0 ] || [ "$unresolved_sync_errs" -gt 0 ] ||
          [ "$sbsyncexit" -gt 0 ]; then
         health_status="DEGRADED"
 
@@ -602,7 +609,7 @@ collect_array_health() {
         [ "$mdnumwrong" -gt 0 ] && issues="${issues}Wrong: $mdnumwrong, "
         [ "$mdnumdisabled" -gt 0 ] && issues="${issues}Disabled: $mdnumdisabled, "
         [ "$mdnumreplaced" -gt 0 ] && issues="${issues}Replaced: $mdnumreplaced, "
-        [ "$sbsyncerrs" -gt 0 ] && issues="${issues}Sync Errors: $sbsyncerrs, "
+        [ "$unresolved_sync_errs" -gt 0 ] && issues="${issues}Sync Errors: $sbsyncerrs, "
         [ "$disks_num_errors" -gt 0 ] && issues="${issues}I/O Errors: $disks_num_errors, "
         health_details=${issues%, }
         health_code=1

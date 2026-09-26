@@ -33,6 +33,16 @@ errs=$(nmdstat sbSyncErrs)
 info "ok: CORRECT check corrected $errs sync errors"
 quiet nmd status || fail "status reports an unhealthy array after a CORRECT check fixed the sync errors"
 
+# The sync error count is kept in the superblock, but whether the last check
+# was a correcting one isn't, so after a module reload the corrected errors
+# are reported as unhealthy again until the next clean check
+array_stop
+array_reload
+array_start
+assert_nmdstat sbSyncErrs "$errs"
+assert_nmdstat mdResyncCorr 0
+assert_fails "status reports unhealthy array with corrected sync errors after reload" quiet nmd status
+
 sync_run NOCORRECT
 assert_nmdstat sbSyncErrs 0
 quiet nmd status || fail "status still reports an unhealthy array after a clean check"

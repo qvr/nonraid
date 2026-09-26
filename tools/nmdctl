@@ -714,6 +714,8 @@ collect_resync_status() {
 
     # Check for paused operation
     if [ "$mdresync" = "0" ] && [ "$mdresyncpos" != "0" ] && [ -n "$mdresyncpos" ]; then
+        # A paused operation is still active, it just isn't making progress
+        RESYNC_STATUS_DATA["active"]="true"
         RESYNC_STATUS_DATA["paused"]="true"
         local progress=0
         if [ "$mdresyncsize" -gt 0 ]; then

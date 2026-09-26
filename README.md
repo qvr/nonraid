@@ -446,7 +446,7 @@ The NonRAID [systemd service](tools/systemd/nonraid.service) will trigger a corr
 
 In unattended mode (`-u`), the check will default to check only mode (`NOCORRECT`), this is recommended for scheduled parity checks and used by the included [quarterly systemd timer](tools/systemd/nonraid-parity-check.timer).
 
-Note that if a parity check corrects any sync errors, the array status will still stay `DEGRADED` until the next parity check without errors.
+Note that sync errors found by a check only (`NOCORRECT`) parity check will keep the array status `DEGRADED` until the next parity check without errors. Sync errors corrected by a correcting parity check don't, until the nonraid module is reloaded (e.g. on reboot), after which the array status stays `DEGRADED` until the next parity check without errors.
 ```bash
 sudo nmdctl check OPTION
 ```

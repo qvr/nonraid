@@ -483,6 +483,13 @@ collect_array_health() {
     local sbsyncerrs="${NMDSTAT_VALUES[sbSyncErrs]}"
     local sbsyncexit="${NMDSTAT_VALUES[sbSyncExit]}"
 
+    # sbSyncErrs counts the errors the last check found, but a correcting check
+    # that finished cleanly has already fixed them
+    local unresolved_sync_errs="$sbsyncerrs"
+    if [ "${NMDSTAT_VALUES[mdResyncCorr]}" = "1" ] && [ "$sbsyncexit" = "0" ]; then
+        unresolved_sync_errs=0
+    fi
+
     # Count the total number of disk slots that are defined in the array
     local total_slots=$(get_defined_slots_count)
 
@@ -592,7 +599,7 @@ collect_array_health() {
         health_code=1
     elif [ "$mdnummissing" -gt 0 ] || [ "$mdnuminvalid" -gt 0 ] ||
          [ "$mdnumwrong" -gt 0 ] || [ "$mdnumdisabled" -gt 0 ] ||
-         [ "$mdnumreplaced" -gt 0 ] || [ "$sbsyncerrs" -gt 0 ] ||
+         [ "$mdnumreplaced" -gt 0 ] || [ "$unresolved_sync_errs" -gt 0 ] ||
          [ "$sbsyncexit" -gt 0 ]; then
         health_status="DEGRADED"
 
@@ -602,7 +609,7 @@ collect_array_health() {
         [ "$mdnumwrong" -gt 0 ] && issues="${issues}Wrong: $mdnumwrong, "
         [ "$mdnumdisabled" -gt 0 ] && issues="${issues}Disabled: $mdnumdisabled, "
         [ "$mdnumreplaced" -gt 0 ] && issues="${issues}Replaced: $mdnumreplaced, "
-        [ "$sbsyncerrs" -gt 0 ] && issues="${issues}Sync Errors: $sbsyncerrs, "
+        [ "$unresolved_sync_errs" -gt 0 ] && issues="${issues}Sync Errors: $sbsyncerrs, "
         [ "$disks_num_errors" -gt 0 ] && issues="${issues}I/O Errors: $disks_num_errors, "
         health_details=${issues%, }
         health_code=1
@@ -714,6 +721,8 @@ collect_resync_status() {
 
     # Check for paused operation
     if [ "$mdresync" = "0" ] && [ "$mdresyncpos" != "0" ] && [ -n "$mdresyncpos" ]; then
+        # A paused operation is still active, it just isn't making progress
+        RESYNC_STATUS_DATA["active"]="true"
         RESYNC_STATUS_DATA["paused"]="true"
         local progress=0
         if [ "$mdresyncsize" -gt 0 ]; then
@@ -727,6 +736,8 @@ collect_resync_status() {
     # Check for pending operations
     elif [ "$mdresync" = "0" ] && { [ "$mdresyncaction" = "clear" ] || [[ "$mdresyncaction" == recon* ]]; }; then
         RESYNC_STATUS_DATA["pending"]="true"
+        RESYNC_STATUS_DATA["size_kb"]="$mdresyncsize"
+        RESYNC_STATUS_DATA["size_gb"]=$(format_kbytes "$mdresyncsize" 0 0 "gb")
     # Check for active operation
     elif [ "$mdresync" != "0" ] && [ -n "$mdresync" ]; then
         RESYNC_STATUS_DATA["active"]="true"
@@ -1824,10 +1835,6 @@ monitor_status_loop() {
 
 # Show current array status
 show_status() {
-    if ! check_nmdstat_exists; then
-        return 1
-    fi
-
     local output_format="default"
 
     # Parse our options
@@ -1879,6 +1886,23 @@ show_status() {
             return 1
             ;;
     esac
+
+    # Keep machine-readable output parseable when there is no array to report on.
+    # check_module_loaded exits the script if the superblock doesn't exist, so
+    # run the check in a subshell to still get to print our own output.
+    if [ "$output_format" = "json" ] || [ "$output_format" = "prometheus" ]; then
+        ( check_nmdstat_exists ) >/dev/null 2>&1
+        if [ ! -f "$PROC_NMDSTAT" ]; then
+            if [ "$output_format" = "json" ]; then
+                echo '{"error": "nonraid module is not loaded or no array is configured"}'
+            else
+                echo "# nonraid module is not loaded or no array is configured"
+            fi
+            return 1
+        fi
+    elif ! check_nmdstat_exists; then
+        return 1
+    fi
 
     # Handle monitor mode
     if [ "$MONITOR_MODE" -eq 1 ]; then

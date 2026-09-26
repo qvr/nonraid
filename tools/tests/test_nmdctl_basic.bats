@@ -389,8 +389,8 @@ EOF
 }
 
 @test "status parsing - Parity check with errors found" {
-    # Create mock with parity check that found errors
-    create_mock_nmdstat "STARTED" 0 0 0 "check P" 0 0 1 15 > "$BATS_TMPDIR/mock_nmdstat_parity_errors"
+    # Create mock with a non-correcting parity check that found errors
+    create_mock_nmdstat "STARTED" 0 0 0 "check P" 0 0 0 15 > "$BATS_TMPDIR/mock_nmdstat_parity_errors"
 
     export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_parity_errors"
     run show_status
@@ -399,6 +399,90 @@ EOF
     echo "$output"
     [ "$status" -eq 1 ]
     [[ "$output" =~ Sync\ Errors:\ 15 ]]
+}
+
+@test "status parsing - Correcting parity check fixed errors" {
+    create_mock_nmdstat "STARTED" 0 0 0 "check P" 0 0 1 15 > "$BATS_TMPDIR/mock_nmdstat_parity_corrected"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_parity_corrected"
+    run show_status
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ Array\ Health.*HEALTHY ]]
+    [[ ! "$output" =~ Sync\ Errors ]]
+}
+
+@test "status parsing - Correcting parity check with errors that did not finish" {
+    create_mock_nmdstat "STARTED" 0 0 0 "check P" 0 0 1 15 > "$BATS_TMPDIR/mock_nmdstat_parity_corrected_aborted"
+    sed -i 's/sbSyncExit=0/sbSyncExit=-4/' "$BATS_TMPDIR/mock_nmdstat_parity_corrected_aborted"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_parity_corrected_aborted"
+    run show_status
+
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ Sync\ Errors:\ 15 ]]
+}
+
+@test "status parsing - Paused parity check" {
+    create_mock_nmdstat "STARTED" 0 0 0 "check P" 500000 1000000 1 0 > "$BATS_TMPDIR/mock_nmdstat_paused"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_paused"
+    run show_status
+
+    echo "$status"
+    echo "$output"
+    [[ "$output" =~ Operation.*Parity-Check\ P.*\(PAUSED\) ]]
+    [[ "$output" =~ Progress.*50% ]]
+
+    run show_status -o json
+    echo "$output"
+    [ "$(echo "$output" | jq -r '.resync.active')" = "true" ]
+    [ "$(echo "$output" | jq -r '.resync.paused')" = "true" ]
+    [ "$(echo "$output" | jq -r '.resync.progress_percent')" = "50" ]
+
+    run show_status -o prometheus
+    echo "$output"
+    [[ "$output" =~ "nonraid_resync_active{label=\"MockArray\"} 1" ]]
+}
+
+@test "status parsing - Pending disk clear reports its size" {
+    create_mock_nmdstat "STARTED" 0 0 0 "clear" 0 2097152 0 0 > "$BATS_TMPDIR/mock_nmdstat_pending_clear"
+
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_pending_clear"
+    run show_status -o json
+
+    echo "$output"
+    [ "$(echo "$output" | jq -r '.resync.pending')" = "true" ]
+    [ "$(echo "$output" | jq -r '.resync.active')" = "false" ]
+    [ "$(echo "$output" | jq -r '.resync.size_gb')" = "2" ]
+}
+
+@test "status parsing - no array configured" {
+    export PROC_NMDSTAT="$BATS_TMPDIR/mock_nmdstat_missing"
+    # check_module_loaded exits cleanly when the superblock doesn't exist
+    eval 'check_nmdstat_exists() { echo "Error: nonraid module is not loaded"; exit 0; }'
+
+    run show_status -o json
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 1 ]
+    echo "$output" | jq -e '.error' > /dev/null
+
+    run show_status -o prometheus
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 1 ]
+    [[ "$output" =~ ^# ]]
+
+    run show_status
+    echo "$status"
+    echo "$output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Error: nonraid module is not loaded" ]]
 }
 
 @test "status parsing - Array with disk errors" {
